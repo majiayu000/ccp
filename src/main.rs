@@ -49,9 +49,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Cmd::Serve { port } => {
             let port = resolve_port(&paths, port);
-            web::serve(paths, port).await
+            let iterm = resolve_iterm(&paths);
+            web::serve(paths, port, iterm).await
         }
     }
+}
+
+/// config.toml `terminal = "iterm"` switches the launcher to iTerm2.
+fn resolve_iterm(paths: &Paths) -> bool {
+    #[derive(serde::Deserialize)]
+    struct Cfg {
+        terminal: Option<String>,
+    }
+    std::fs::read_to_string(paths.config_file())
+        .ok()
+        .and_then(|raw| toml::from_str::<Cfg>(&raw).ok())
+        .and_then(|c| c.terminal)
+        .is_some_and(|t| t == "iterm")
 }
 
 fn resolve_port(paths: &Paths, flag: Option<u16>) -> u16 {

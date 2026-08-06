@@ -2,18 +2,23 @@
 //! `~/.claude-*` dirs, template symlinks, and the shared env overlay.
 
 use crate::paths::{Paths, DEFAULT_PROFILE};
+use crate::secret::{self, SecretStore};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// Env files hold tokens; they must never be world-readable.
 const ENV_FILE_MODE: u32 = 0o600;
 
 /// Symlinked from `~/.claude` into newly created profile homes.
 const TEMPLATE_ENTRIES: [&str; 3] = ["CLAUDE.md", "agents", "skills"];
+
+/// Keychain slot for shared-overlay secrets (not a real profile).
+const SHARED_SLOT: &str = "_shared";
 
 #[derive(Debug)]
 pub enum StoreError {
@@ -81,11 +86,18 @@ pub struct Unmanaged {
 
 pub struct ProfileStore {
     paths: Paths,
+    secrets: Arc<dyn SecretStore>,
 }
 
 impl ProfileStore {
+    /// Production store: tokens go to the OS keychain.
     pub fn new(paths: Paths) -> Self {
-        Self { paths }
+        Self::with_secrets(paths, Arc::new(secret::KeychainStore))
+    }
+
+    /// Store with an injectable secret backend (tests use in-memory).
+    pub fn with_secrets(paths: Paths, secrets: Arc<dyn SecretStore>) -> Self {
+        Self { paths, secrets }
     }
 
     /// One managed profile by name (`default` resolves even without a file).
@@ -170,8 +182,10 @@ impl ProfileStore {
         if home.exists() {
             return Err(StoreError::HomeExists(home));
         }
+        let env = self.protect_secrets(name, env)?;
         fs::create_dir_all(&home)?;
         self.apply_templates(&home);
+        self.copy_mcp_servers(&home);
         self.write_profile_file(
             name,
             &ProfileFile {
@@ -204,6 +218,7 @@ impl ProfileStore {
     }
 
     /// Merge env updates. An empty value deletes the key.
+    /// Secret values are diverted to the keychain; the file keeps a marker.
     pub fn update_env(
         &self,
         name: &str,
@@ -214,6 +229,12 @@ impl ProfileStore {
         for (k, v) in patch {
             if v.is_empty() {
                 file.env.remove(&k);
+                if secret::is_secret_key(&k) {
+                    let _ = self.secrets.delete(name, &k);
+                }
+            } else if secret::is_secret_key(&k) && !secret::is_marker(&v) {
+                self.secrets.set(name, &k, &v).map_err(StoreError::Io)?;
+                file.env.insert(k, secret::MARKER.into());
             } else {
                 file.env.insert(k, v);
             }
@@ -222,7 +243,63 @@ impl ProfileStore {
         self.read_profile(name)
     }
 
+    /// Env with keychain markers resolved to real values — for launching,
+    /// connectivity tests, and plaintext export. Fails closed if a marker
+    /// has no keychain entry.
+    pub fn resolve_env(&self, name: &str) -> Result<BTreeMap<String, String>, StoreError> {
+        let profile = self.get(name)?;
+        self.resolve_map(name, profile.env)
+    }
+
+    /// Shared overlay with markers resolved (stored under the `_shared` slot).
+    pub fn resolve_shared(&self) -> Result<BTreeMap<String, String>, StoreError> {
+        self.resolve_map(SHARED_SLOT, self.read_shared()?)
+    }
+
+    fn resolve_map(
+        &self,
+        owner: &str,
+        env: BTreeMap<String, String>,
+    ) -> Result<BTreeMap<String, String>, StoreError> {
+        let mut out = BTreeMap::new();
+        for (k, v) in env {
+            if secret::is_marker(&v) {
+                let real = self
+                    .secrets
+                    .get(owner, &k)
+                    .map_err(StoreError::Io)?
+                    .ok_or_else(|| {
+                        StoreError::Io(io::Error::new(
+                            io::ErrorKind::NotFound,
+                            format!("no keychain entry for {owner}/{k}; re-enter the token"),
+                        ))
+                    })?;
+                out.insert(k, real);
+            } else {
+                out.insert(k, v);
+            }
+        }
+        Ok(out)
+    }
+
+    /// Divert secret-keyed values into the keychain, leaving markers behind.
+    fn protect_secrets(
+        &self,
+        name: &str,
+        mut env: BTreeMap<String, String>,
+    ) -> Result<BTreeMap<String, String>, StoreError> {
+        for (k, v) in env.iter_mut() {
+            if secret::is_secret_key(k) && !v.is_empty() && !secret::is_marker(v) {
+                self.secrets.set(name, k, v).map_err(StoreError::Io)?;
+                *v = secret::MARKER.into();
+            }
+        }
+        Ok(env)
+    }
+
     /// Unmanage a profile. `purge` also deletes the home dir (sessions included).
+    /// Keychain entries for the profile are removed either way — orphaned
+    /// secrets serve nothing.
     pub fn delete(&self, name: &str, purge: bool) -> Result<(), StoreError> {
         validate_name(name)?;
         if name == DEFAULT_PROFILE {
@@ -231,6 +308,13 @@ impl ProfileStore {
         let file = self.paths.profile_file(name);
         if !file.exists() {
             return Err(StoreError::NotFound(name.into()));
+        }
+        if let Ok(profile) = self.read_profile(name) {
+            for (k, v) in &profile.env {
+                if secret::is_marker(v) {
+                    let _ = self.secrets.delete(name, k);
+                }
+            }
         }
         fs::remove_file(file)?;
         if purge {
@@ -254,10 +338,14 @@ impl ProfileStore {
     }
 
     pub fn write_shared(&self, patch: BTreeMap<String, String>) -> Result<(), StoreError> {
+        let patch = self.protect_secrets(SHARED_SLOT, patch)?;
         let mut env = self.read_shared()?;
         for (k, v) in patch {
             if v.is_empty() {
                 env.remove(&k);
+                if secret::is_secret_key(&k) {
+                    let _ = self.secrets.delete(SHARED_SLOT, &k);
+                }
             } else {
                 env.insert(k, v);
             }
@@ -316,6 +404,30 @@ impl ProfileStore {
             #[cfg(unix)]
             let _ = std::os::unix::fs::symlink(&src, &dst);
         }
+    }
+
+    /// Copy `mcpServers` from the default profile's `.claude.json` so the new
+    /// profile starts with the same MCP servers. Best-effort: any parse or
+    /// write trouble skips the copy rather than failing creation.
+    fn copy_mcp_servers(&self, home: &std::path::Path) {
+        let src = self.paths.default_claude_home().join(".claude.json");
+        let Ok(raw) = fs::read_to_string(&src) else {
+            return;
+        };
+        let Ok(json) = serde_json::from_str::<serde_json::Value>(&raw) else {
+            return;
+        };
+        let Some(servers) = json.get("mcpServers").and_then(|m| m.as_object()) else {
+            return;
+        };
+        if servers.is_empty() {
+            return;
+        }
+        let out = serde_json::json!({ "mcpServers": servers });
+        let Ok(body) = serde_json::to_string_pretty(&out) else {
+            return;
+        };
+        let _ = write_private(&home.join(".claude.json"), body.as_bytes());
     }
 }
 

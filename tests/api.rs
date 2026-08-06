@@ -4,6 +4,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use axum::Router;
 use ccp::paths::Paths;
+use ccp::secret::SecretStore;
 use ccp::web::{router, AppState};
 use serde_json::{json, Value};
 use tower::ServiceExt;
@@ -13,6 +14,7 @@ struct Fixture {
     _tmp: tempfile::TempDir,
     user_home: std::path::PathBuf,
     ccp_home: std::path::PathBuf,
+    secrets: std::sync::Arc<ccp::secret::MemoryStore>,
 }
 
 fn fixture() -> Fixture {
@@ -21,12 +23,14 @@ fn fixture() -> Fixture {
     let ccp_home = tmp.path().join("ccp");
     std::fs::create_dir_all(user_home.join(".claude")).expect("default home");
     let paths = Paths::new(&user_home, &ccp_home);
-    let app = router(AppState::new(paths));
+    let secrets = std::sync::Arc::new(ccp::secret::MemoryStore::default());
+    let app = router(AppState::with_parts(paths, secrets.clone(), |_cmd| Ok(())));
     Fixture {
         app,
         _tmp: tmp,
         user_home,
         ccp_home,
+        secrets,
     }
 }
 
@@ -99,10 +103,11 @@ async fn create_profile_happy_path() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
-    // Secrets are masked in responses.
-    let token = body["env"]["ANTHROPIC_AUTH_TOKEN"].as_str().unwrap();
-    assert!(token.contains('…'), "masked: {token}");
-    assert!(!token.contains("cdef"));
+    // Token never appears in responses or files — keychain marker instead.
+    assert_eq!(
+        body["env"]["ANTHROPIC_AUTH_TOKEN"].as_str().unwrap(),
+        "🔑 keychain"
+    );
 
     // Home dir created at top level, template symlinked, file is 0600.
     let home = f.user_home.join(".claude-kimi");
@@ -117,9 +122,17 @@ async fn create_profile_happy_path() {
         use std::os::unix::fs::PermissionsExt;
         assert_eq!(meta.permissions().mode() & 0o777, 0o600);
     }
-    // Raw file holds the real token.
+    // File holds only the marker; the secret backend holds the real token.
     let raw = std::fs::read_to_string(f.ccp_home.join("profiles/kimi.toml")).unwrap();
-    assert!(raw.contains("sk-test-1234567890"));
+    assert!(raw.contains("@keychain"));
+    assert!(!raw.contains("sk-test"));
+    assert_eq!(
+        f.secrets
+            .get("kimi", "ANTHROPIC_AUTH_TOKEN")
+            .unwrap()
+            .as_deref(),
+        Some("sk-test-1234567890")
+    );
 }
 
 #[tokio::test]
@@ -269,7 +282,8 @@ async fn sessions_list_and_launch_with_injected_launcher() {
     let captured: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let cap = captured.clone();
     let paths = Paths::new(&user_home, &ccp_home);
-    let app = router(AppState::with_launcher(paths, move |cmd| {
+    let secrets = Arc::new(ccp::secret::MemoryStore::default());
+    let app = router(AppState::with_parts(paths, secrets, move |cmd| {
         cap.lock().unwrap().push(cmd.to_string());
         Ok(())
     }));
@@ -406,7 +420,7 @@ async fn export_masks_and_import_respects_policy() {
     )
     .await;
 
-    // Default export masks tokens.
+    // Default export shows the keychain marker, never the token.
     let (status, body) = call(f.app.clone(), get0("/api/export")).await;
     assert_eq!(status, StatusCode::OK);
     let kimi = body["profiles"]
@@ -416,10 +430,10 @@ async fn export_masks_and_import_respects_policy() {
         .find(|p| p["name"] == "kimi")
         .unwrap()
         .clone();
-    assert!(kimi["env"]["ANTHROPIC_AUTH_TOKEN"]
-        .as_str()
-        .unwrap()
-        .contains('…'));
+    assert_eq!(
+        kimi["env"]["ANTHROPIC_AUTH_TOKEN"].as_str().unwrap(),
+        "🔑 keychain"
+    );
 
     // include_secrets round-trips the real value.
     let (_, body) = call(f.app.clone(), get0("/api/export?include_secrets=true")).await;

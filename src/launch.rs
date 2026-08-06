@@ -52,8 +52,21 @@ pub fn spawn_terminal(command: &str) -> io::Result<()> {
         "tell application \"Terminal\" to do script \"{}\"",
         as_escape(command)
     );
+    run_osascript(&script)
+}
+
+/// Open a new iTerm2 window running `command`.
+pub fn spawn_iterm(command: &str) -> io::Result<()> {
+    let script = format!(
+        "tell application \"iTerm\" to create window with default profile command \"{}\"",
+        as_escape(command)
+    );
+    run_osascript(&script)
+}
+
+fn run_osascript(script: &str) -> io::Result<()> {
     let status = std::process::Command::new("osascript")
-        .args(["-e", &script])
+        .args(["-e", script])
         .status()?;
     if status.success() {
         Ok(())

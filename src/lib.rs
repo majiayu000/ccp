@@ -7,5 +7,7 @@ pub mod page;
 pub mod paths;
 pub mod presets;
 pub mod profile;
+pub mod secret;
 pub mod sessions;
+pub mod usage;
 pub mod web;

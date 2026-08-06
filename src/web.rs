@@ -6,7 +6,9 @@ use crate::page::INDEX_HTML;
 use crate::paths::Paths;
 use crate::presets;
 use crate::profile::{mask, Profile, ProfileStore, StoreError, Unmanaged};
+use crate::secret;
 use crate::sessions;
+use crate::usage;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Json};
@@ -36,8 +38,16 @@ impl AppState {
         paths: Paths,
         launcher: impl Fn(&str) -> std::io::Result<()> + Send + Sync + 'static,
     ) -> Self {
+        Self::with_parts(paths, std::sync::Arc::new(secret::KeychainStore), launcher)
+    }
+
+    pub fn with_parts(
+        paths: Paths,
+        secrets: std::sync::Arc<dyn secret::SecretStore>,
+        launcher: impl Fn(&str) -> std::io::Result<()> + Send + Sync + 'static,
+    ) -> Self {
         Self {
-            store: std::sync::Arc::new(ProfileStore::new(paths)),
+            store: std::sync::Arc::new(ProfileStore::with_secrets(paths, secrets)),
             launcher: std::sync::Arc::new(launcher),
         }
     }
@@ -56,14 +66,20 @@ pub fn router(state: AppState) -> Router {
         .route("/api/profiles/{name}/sessions", get(list_sessions))
         .route("/api/profiles/{name}/launch", post(launch_profile))
         .route("/api/profiles/{name}/test", post(test_profile))
+        .route("/api/profiles/{name}/usage", get(profile_usage))
         .route("/api/export", get(export_profiles))
         .route("/api/import", post(import_profiles))
         .route("/api/shared", get(get_shared).put(put_shared))
         .with_state(state)
 }
 
-pub async fn serve(paths: Paths, port: u16) -> Result<(), Box<dyn std::error::Error>> {
-    let app = router(AppState::new(paths));
+pub async fn serve(paths: Paths, port: u16, iterm: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let state = if iterm {
+        AppState::with_launcher(paths, launch::spawn_iterm)
+    } else {
+        AppState::new(paths)
+    };
+    let app = router(state);
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
     eprintln!("ccp GUI: http://127.0.0.1:{port}");
     axum::serve(listener, app).await?;
@@ -89,7 +105,18 @@ impl From<Profile> for ProfileView {
             home: p.home.display().to_string(),
             preset: p.preset,
             managed: p.managed,
-            env: p.env.into_iter().map(|(k, v)| (k, mask(&v))).collect(),
+            env: p
+                .env
+                .into_iter()
+                .map(|(k, v)| {
+                    let shown = if secret::is_marker(&v) {
+                        "🔑 keychain".to_string()
+                    } else {
+                        mask(&v)
+                    };
+                    (k, shown)
+                })
+                .collect(),
         }
     }
 }
@@ -140,6 +167,16 @@ pub struct LaunchRequest {
 pub struct ExportQuery {
     #[serde(default)]
     include_secrets: bool,
+}
+
+#[derive(Deserialize)]
+pub struct UsageQuery {
+    #[serde(default = "default_usage_days")]
+    days: u64,
+}
+
+fn default_usage_days() -> u64 {
+    30
 }
 
 #[derive(Deserialize)]
@@ -250,9 +287,10 @@ async fn launch_profile(
     Json(body): Json<LaunchRequest>,
 ) -> Result<StatusCode, ApiError> {
     let profile = state.store.get(&name)?;
-    // Shared overlay goes under the profile's own env; profile wins on conflict.
-    let mut env = state.store.read_shared()?;
-    env.extend(profile.env);
+    // Shared overlay under the profile's own env; profile wins on conflict.
+    // Both are keychain-resolved so the child process gets real values.
+    let mut env = state.store.resolve_shared()?;
+    env.extend(state.store.resolve_env(&name)?);
     if let Some(id) = &body.resume {
         if !sessions::is_resumable_id(id) {
             return Err(ApiError::bad_request(format!("invalid session id {id:?}")));
@@ -275,9 +313,9 @@ async fn test_profile(
     State(state): State<AppState>,
     Path(name): Path<String>,
 ) -> Result<Json<connect::Connectivity>, ApiError> {
-    let profile = state.store.get(&name)?;
-    let mut env = state.store.read_shared()?;
-    env.extend(profile.env);
+    state.store.get(&name)?;
+    let mut env = state.store.resolve_shared()?;
+    env.extend(state.store.resolve_env(&name)?);
     let base = env.get("ANTHROPIC_BASE_URL").map(String::as_str);
     let token = env
         .get("ANTHROPIC_AUTH_TOKEN")
@@ -295,31 +333,77 @@ async fn export_profiles(
     Query(q): Query<ExportQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let (profiles, _) = state.store.list()?;
-    let mask_map = |env: BTreeMap<String, String>| -> BTreeMap<String, String> {
-        if q.include_secrets {
-            env
+    let mut out_profiles = Vec::new();
+    for p in profiles {
+        let env = if q.include_secrets {
+            state.store.resolve_env(&p.name)?
         } else {
-            env.into_iter().map(|(k, v)| (k, mask(&v))).collect()
-        }
+            p.env
+                .into_iter()
+                .map(|(k, v)| {
+                    let shown = if secret::is_marker(&v) {
+                        "🔑 keychain".to_string()
+                    } else {
+                        mask(&v)
+                    };
+                    (k, shown)
+                })
+                .collect()
+        };
+        out_profiles.push(serde_json::json!({
+            "name": p.name,
+            "preset": p.preset,
+            "env": env,
+        }));
+    }
+    let shared = if q.include_secrets {
+        state.store.resolve_shared()?
+    } else {
+        state
+            .store
+            .read_shared()?
+            .into_iter()
+            .map(|(k, v)| {
+                let shown = if secret::is_marker(&v) {
+                    "🔑 keychain".to_string()
+                } else {
+                    mask(&v)
+                };
+                (k, shown)
+            })
+            .collect()
     };
-    let shared = state.store.read_shared()?;
     Ok(Json(serde_json::json!({
         "version": 1,
-        "profiles": profiles
-            .into_iter()
-            .map(|p| serde_json::json!({
-                "name": p.name,
-                "preset": p.preset,
-                "env": mask_map(p.env),
-            }))
-            .collect::<Vec<_>>(),
-        "shared": mask_map(shared),
+        "profiles": out_profiles,
+        "shared": shared,
         "warning": if q.include_secrets {
             "this file contains plaintext tokens — store it accordingly"
         } else {
-            "tokens are masked; re-enter them after import"
+            "tokens are masked or keychain references; re-enter them after import"
         },
     })))
+}
+
+async fn profile_usage(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    Query(q): Query<UsageQuery>,
+) -> Result<Json<usage::UsageReport>, ApiError> {
+    let profile = state.store.get(&name)?;
+    let days = q.days.clamp(1, 365);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let since = now.saturating_sub(days * 86400);
+    let report = tokio::task::spawn_blocking(move || usage::scan(&profile.home, since))
+        .await
+        .map_err(|e| ApiError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: format!("usage scan failed: {e}"),
+        })??;
+    Ok(Json(report))
 }
 
 async fn import_profiles(
@@ -365,7 +449,18 @@ async fn get_shared(
     State(state): State<AppState>,
 ) -> Result<Json<BTreeMap<String, String>>, ApiError> {
     let env = state.store.read_shared()?;
-    Ok(Json(env.into_iter().map(|(k, v)| (k, mask(&v))).collect()))
+    Ok(Json(
+        env.into_iter()
+            .map(|(k, v)| {
+                let shown = if secret::is_marker(&v) {
+                    "🔑 keychain".to_string()
+                } else {
+                    mask(&v)
+                };
+                (k, shown)
+            })
+            .collect(),
+    ))
 }
 
 async fn put_shared(

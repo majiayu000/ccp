@@ -120,6 +120,18 @@
   .sess .time { color: var(--faint); font-size: 11.5px; min-width: 60px; text-align: right; }
   .sess-empty { color: var(--faint); font-size: 12.5px; padding: 12px 4px; }
 
+  /* ---------- usage ---------- */
+  .usage-list { margin: 10px 0 0 51px; border-top: 1px solid var(--border-soft);
+                padding-top: 14px; }
+  .usage-totals { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+  .bars { display: flex; align-items: flex-end; gap: 2px; height: 56px; margin: 4px 0 10px; }
+  .bar { flex: 1; min-width: 3px; background: linear-gradient(180deg, #8b85ff, #5f6cff);
+         border-radius: 2px 2px 0 0; opacity: .85; transition: opacity .12s; }
+  .bar:hover { opacity: 1; }
+  .bar.zero { background: rgba(255,255,255,.07); }
+  .usage-axis { display: flex; justify-content: space-between; color: var(--faint);
+                font-size: 10.5px; font-family: var(--mono); margin-bottom: 8px; }
+
   /* ---------- modal ---------- */
   .backdrop { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center;
               background: rgba(0,0,0,.6); backdrop-filter: blur(4px); }
@@ -241,6 +253,7 @@ const STD_KEYS = new Set(STD_FIELDS.map(([, k]) => k));
 let presets = [];
 let editing = null;
 const openSess = new Set();   // profile names with sessions expanded
+const openUsage = new Set();  // profile names with usage expanded
 
 /* ---------- helpers ---------- */
 async function api(path, opts = {}) {
@@ -337,10 +350,67 @@ function renderProfiles(profiles) {
               id="toggle-${esc(p.name)}" onclick="toggleSessions('${esc(p.name)}')">
         <span class="arrow">▶</span> 历史会话
       </button>
+      <button class="sess-toggle ${openUsage.has(p.name) ? "open" : ""}"
+              id="utoggle-${esc(p.name)}" onclick="toggleUsage('${esc(p.name)}')">
+        <span class="arrow">▶</span> 用量(30 天)
+      </button>
       <div class="sess-list" id="sess-${esc(p.name)}" ${openSess.has(p.name) ? "" : "hidden"}></div>
+      <div class="usage-list" id="usage-${esc(p.name)}" ${openUsage.has(p.name) ? "" : "hidden"}></div>
     </div>`;
   }).join("");
   for (const name of openSess) loadSessions(name);
+  for (const name of openUsage) loadUsage(name);
+}
+
+function fmtTokens(n) {
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + "K";
+  return String(n);
+}
+
+async function toggleUsage(name) {
+  const el = document.getElementById(`usage-${name}`);
+  const toggle = document.getElementById(`utoggle-${name}`);
+  if (openUsage.has(name)) {
+    openUsage.delete(name);
+    el.hidden = true;
+    toggle.classList.remove("open");
+  } else {
+    openUsage.add(name);
+    el.hidden = false;
+    toggle.classList.add("open");
+    await loadUsage(name);
+  }
+}
+
+async function loadUsage(name) {
+  const el = document.getElementById(`usage-${name}`);
+  if (!el) return;
+  el.innerHTML = '<div class="sess-empty">统计中…</div>';
+  try {
+    const r = await api(`/api/profiles/${encodeURIComponent(name)}/usage?days=30`);
+    const days = Object.entries(r.days);
+    if (!days.length) {
+      el.innerHTML = '<div class="sess-empty">近 30 天无用量记录</div>';
+      return;
+    }
+    const max = Math.max(...days.map(([, d]) => d.output), 1);
+    el.innerHTML = `
+      <div class="usage-totals">
+        <span class="chip">输入 <b>${fmtTokens(r.totals.input)}</b></span>
+        <span class="chip">输出 <b>${fmtTokens(r.totals.output)}</b></span>
+        <span class="chip">缓存读 <b>${fmtTokens(r.totals.cache_read)}</b></span>
+        <span class="chip">缓存写 <b>${fmtTokens(r.totals.cache_write)}</b></span>
+        ${Object.entries(r.models).map(([m, t]) =>
+          `<span class="chip">${esc(m)} <b>${fmtTokens(t)}</b></span>`).join("")}
+      </div>
+      <div class="bars">${days.map(([date, d]) =>
+        `<div class="bar${d.output ? "" : " zero"}" style="height:${Math.max(2, Math.round(d.output / max * 52))}px"
+              title="${esc(date)}:输出 ${fmtTokens(d.output)} / 输入 ${fmtTokens(d.input)}"></div>`).join("")}</div>
+      <div class="usage-axis"><span>${esc(days[0][0])}</span><span>${esc(days[days.length - 1][0])}</span></div>`;
+  } catch (e) {
+    el.innerHTML = `<div class="sess-empty">加载失败:${esc(e.message)}</div>`;
+  }
 }
 
 async function toggleSessions(name) {

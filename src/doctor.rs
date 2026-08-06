@@ -35,6 +35,7 @@ pub fn run(paths: &Paths) -> Vec<Check> {
                 }
                 checks.push(file_perm_check(paths, &p.name));
                 checks.extend(broken_symlink_checks(&p.home));
+                checks.extend(plaintext_secret_checks(p));
             }
             if unmanaged.is_empty() {
                 checks.push(Check {
@@ -129,6 +130,21 @@ fn broken_symlink_checks(home: &Path) -> Vec<Check> {
         }
     }
     out
+}
+
+/// Tokens sitting in the TOML as plaintext instead of the keychain.
+fn plaintext_secret_checks(p: &crate::profile::Profile) -> Vec<Check> {
+    p.env
+        .iter()
+        .filter(|(k, v)| crate::secret::is_secret_key(k) && !crate::secret::is_marker(v))
+        .map(|(k, _)| Check {
+            ok: false,
+            label: format!(
+                "profile {:?} stores {k} in plaintext — re-save it to move to keychain",
+                p.name
+            ),
+        })
+        .collect()
 }
 
 pub fn print_report(checks: &[Check]) -> i32 {
