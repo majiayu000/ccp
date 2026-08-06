@@ -88,6 +88,14 @@ impl ProfileStore {
         Self { paths }
     }
 
+    /// One managed profile by name (`default` resolves even without a file).
+    pub fn get(&self, name: &str) -> Result<Profile, StoreError> {
+        if name == DEFAULT_PROFILE && !self.paths.profile_file(name).exists() {
+            return Ok(self.default_profile());
+        }
+        self.read_profile(name)
+    }
+
     /// Managed profiles (default always included) + unmanaged `~/.claude-*` dirs.
     pub fn list(&self) -> Result<(Vec<Profile>, Vec<Unmanaged>), StoreError> {
         let mut profiles = Vec::new();

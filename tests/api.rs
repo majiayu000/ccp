@@ -253,6 +253,87 @@ async fn delete_requires_confirm_and_keeps_home() {
 }
 
 #[tokio::test]
+async fn sessions_list_and_launch_with_injected_launcher() {
+    use std::sync::{Arc, Mutex};
+    let tmp = tempfile::tempdir().unwrap();
+    let user_home = tmp.path().join("home");
+    let ccp_home = tmp.path().join("ccp");
+    let session_dir = user_home.join(".claude/projects/-work-proj");
+    std::fs::create_dir_all(&session_dir).unwrap();
+    std::fs::write(
+        session_dir.join("1e4f5b3c-9a2d-4c8e-bf01-23456789abcd.jsonl"),
+        "{\"type\":\"user\",\"message\":{\"content\":\"hello world\"},\"cwd\":\"/work/proj\"}\n",
+    )
+    .unwrap();
+
+    let captured: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let cap = captured.clone();
+    let paths = Paths::new(&user_home, &ccp_home);
+    let app = router(AppState::with_launcher(paths, move |cmd| {
+        cap.lock().unwrap().push(cmd.to_string());
+        Ok(())
+    }));
+
+    // Sessions for the default profile come from its real projects/ dir.
+    let (status, body) = call(app.clone(), get0("/api/profiles/default/sessions")).await;
+    assert_eq!(status, StatusCode::OK);
+    let sessions = body.as_array().unwrap();
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0]["preview"], "hello world");
+    assert_eq!(sessions[0]["cwd"], "/work/proj");
+
+    // Unknown profile → 404.
+    let (status, _) = call(app.clone(), get0("/api/profiles/ghost/sessions")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // Launch: shared overlay under profile env, resume id validated.
+    call(
+        app.clone(),
+        json_req("PUT", "/api/shared", json!({"env": {"SHARED": "yes"}})),
+    )
+    .await;
+    call(
+        app.clone(),
+        json_req(
+            "POST",
+            "/api/profiles",
+            json!({"name": "kimi", "env": {"ANTHROPIC_AUTH_TOKEN": "sk-x"}}),
+        ),
+    )
+    .await;
+    let (status, _) = call(
+        app.clone(),
+        json_req(
+            "POST",
+            "/api/profiles/kimi/launch",
+            json!({"resume": "not-a-uuid"}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let (status, _) = call(
+        app.clone(),
+        json_req(
+            "POST",
+            "/api/profiles/kimi/launch",
+            json!({"resume": "1e4f5b3c-9a2d-4c8e-bf01-23456789abcd", "cwd": "/work/proj"}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let cmds = captured.lock().unwrap();
+    assert_eq!(cmds.len(), 1);
+    let cmd = &cmds[0];
+    assert!(cmd.starts_with("cd '/work/proj' && env CLAUDE_CONFIG_DIR="));
+    assert!(cmd.contains(".claude-kimi"));
+    assert!(cmd.contains("SHARED='yes'"));
+    assert!(cmd.contains("ANTHROPIC_AUTH_TOKEN='sk-x'"));
+    assert!(cmd.ends_with("claude --resume '1e4f5b3c-9a2d-4c8e-bf01-23456789abcd'"));
+}
+
+#[tokio::test]
 async fn shared_overlay_roundtrip_masked() {
     let f = fixture();
     let (status, _) = call(

@@ -145,6 +145,8 @@ function renderProfiles(profiles) {
         ${p.managed ? "" : '<span class="badge">未托管</span>'}
         <span class="home">${esc(p.home)}</span>
         <div class="spacer"></div>
+        <button onclick="launchProfile('${esc(p.name)}')">▶ 启动</button>
+        <button class="ghost" onclick="toggleSessions('${esc(p.name)}')">会话</button>
         <button class="ghost" onclick="openEditor('${esc(p.name)}')">编辑</button>
         ${p.name === "default" ? "" :
           `<button class="danger" onclick="delProfile('${esc(p.name)}')">删除</button>`}
@@ -154,6 +156,7 @@ function renderProfiles(profiles) {
           `<span class="envchip">${esc(k)}=${esc(v)}</span>`).join("") ||
           '<span class="muted">无环境变量(用 ~/.claude 自身配置 / 官方登录)</span>'}
       </div>
+      <div id="sessions-${esc(p.name)}" hidden></div>
     </div>`).join("");
 }
 
@@ -227,6 +230,42 @@ function collectKv(listId, out) {
     if (v === "" && row.dataset.existing) continue; // untouched masked secret
     out[k] = v;
   }
+}
+
+async function launchProfile(name) {
+  await api(`/api/profiles/${encodeURIComponent(name)}/launch`,
+    { method: "POST", body: "{}" });
+}
+
+async function resumeSession(name, id, cwd) {
+  await api(`/api/profiles/${encodeURIComponent(name)}/launch`,
+    { method: "POST", body: JSON.stringify({ resume: id, cwd: cwd || null }) });
+}
+
+function relTime(secs) {
+  const d = Date.now() / 1000 - secs;
+  if (d < 3600) return `${Math.max(1, Math.round(d / 60))} 分钟前`;
+  if (d < 86400) return `${Math.round(d / 3600)} 小时前`;
+  return `${Math.round(d / 86400)} 天前`;
+}
+
+async function toggleSessions(name) {
+  const el = document.getElementById(`sessions-${name}`);
+  if (!el.hidden) { el.hidden = true; return; }
+  el.hidden = false;
+  el.innerHTML = '<p class="muted">扫描会话中…</p>';
+  const list = await api(`/api/profiles/${encodeURIComponent(name)}/sessions`);
+  if (!list.length) {
+    el.innerHTML = '<p class="muted">该 profile 还没有历史会话</p>';
+    return;
+  }
+  el.innerHTML = list.map(s => `
+    <div class="row" style="padding:5px 0;border-top:1px solid #23262e">
+      <button class="ghost" title="在新终端窗口续聊"
+        onclick="resumeSession('${esc(name)}','${esc(s.id)}','${esc(s.cwd || "")}')">续聊</button>
+      <span style="flex:1">${esc(s.preview)}</span>
+      <span class="muted">${relTime(s.modified)}</span>
+    </div>`).join("");
 }
 
 async function openEditor(name) {

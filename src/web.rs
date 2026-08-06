@@ -1,9 +1,11 @@
 //! axum server: routes, handlers, error mapping.
 
+use crate::launch;
 use crate::page::INDEX_HTML;
 use crate::paths::Paths;
 use crate::presets;
 use crate::profile::{mask, Profile, ProfileStore, StoreError, Unmanaged};
+use crate::sessions;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Json};
@@ -12,15 +14,30 @@ use axum::Router;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+/// How many sessions to return per profile.
+const SESSION_LIST_LIMIT: usize = 50;
+
+/// Launch hook: production spawns Terminal via osascript; tests capture.
+type Launcher = std::sync::Arc<dyn Fn(&str) -> std::io::Result<()> + Send + Sync>;
+
 #[derive(Clone)]
 pub struct AppState {
     store: std::sync::Arc<ProfileStore>,
+    launcher: Launcher,
 }
 
 impl AppState {
     pub fn new(paths: Paths) -> Self {
+        Self::with_launcher(paths, launch::spawn_terminal)
+    }
+
+    pub fn with_launcher(
+        paths: Paths,
+        launcher: impl Fn(&str) -> std::io::Result<()> + Send + Sync + 'static,
+    ) -> Self {
         Self {
             store: std::sync::Arc::new(ProfileStore::new(paths)),
+            launcher: std::sync::Arc::new(launcher),
         }
     }
 }
@@ -35,6 +52,8 @@ pub fn router(state: AppState) -> Router {
             "/api/profiles/{name}",
             put(update_profile).delete(delete_profile),
         )
+        .route("/api/profiles/{name}/sessions", get(list_sessions))
+        .route("/api/profiles/{name}/launch", post(launch_profile))
         .route("/api/shared", get(get_shared).put(put_shared))
         .with_state(state)
 }
@@ -105,6 +124,14 @@ pub struct DeleteQuery {
     purge: bool,
 }
 
+#[derive(Deserialize)]
+pub struct LaunchRequest {
+    #[serde(default)]
+    resume: Option<String>,
+    #[serde(default)]
+    cwd: Option<String>,
+}
+
 // ---------- handlers ----------
 
 async fn index() -> Html<&'static str> {
@@ -165,6 +192,42 @@ async fn delete_profile(
     Ok(StatusCode::NO_CONTENT)
 }
 
+async fn list_sessions(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<Json<Vec<sessions::SessionSummary>>, ApiError> {
+    let profile = state.store.get(&name)?;
+    let list = sessions::scan(&profile.home, SESSION_LIST_LIMIT)?;
+    Ok(Json(list))
+}
+
+async fn launch_profile(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    Json(body): Json<LaunchRequest>,
+) -> Result<StatusCode, ApiError> {
+    let profile = state.store.get(&name)?;
+    // Shared overlay goes under the profile's own env; profile wins on conflict.
+    let mut env = state.store.read_shared()?;
+    env.extend(profile.env);
+    if let Some(id) = &body.resume {
+        if !sessions::is_resumable_id(id) {
+            return Err(ApiError::bad_request(format!("invalid session id {id:?}")));
+        }
+    }
+    let cmd = launch::build_command(
+        &profile.home,
+        &env,
+        body.resume.as_deref(),
+        body.cwd.as_deref(),
+    );
+    (state.launcher)(&cmd).map_err(|e| ApiError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        message: format!("failed to open Terminal: {e}"),
+    })?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 async fn get_shared(
     State(state): State<AppState>,
 ) -> Result<Json<BTreeMap<String, String>>, ApiError> {
@@ -207,6 +270,15 @@ impl From<StoreError> for ApiError {
         Self {
             status,
             message: e.to_string(),
+        }
+    }
+}
+
+impl From<std::io::Error> for ApiError {
+    fn from(e: std::io::Error) -> Self {
+        Self {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: format!("io error: {e}"),
         }
     }
 }
