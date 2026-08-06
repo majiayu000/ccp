@@ -7,165 +7,178 @@
 <style>
   :root {
     color-scheme: dark;
-    --bg: #0b0d12; --side: #0e1118; --card: #151a24; --card-hover: #1a202c;
-    --border: #232a38; --border-soft: #1c2230;
-    --text: #e9ecf3; --muted: #8b93a6; --faint: #5c6373;
-    --accent: #6d7cff; --accent2: #4f8cff;
-    --danger: #e06767; --ok: #5fce8f;
-    --radius: 12px;
+    --bg: #0a0a0b;
+    --card: rgba(255,255,255,.028);
+    --card-hover: rgba(255,255,255,.05);
+    --border: rgba(255,255,255,.08);
+    --border-soft: rgba(255,255,255,.05);
+    --text: #ededf0;
+    --muted: #9a9fab;
+    --faint: #62666f;
+    --accent: #8b85ff;
+    --ok: #4ecb8d;
+    --warn: #e5b567;
+    --danger: #e06767;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
   }
   * { box-sizing: border-box; }
-  html, body { height: 100%; }
   body {
-    margin: 0; display: flex; background: var(--bg); color: var(--text);
-    font: 14px/1.6 -apple-system, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14.5px/1.65 -apple-system, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
     -webkit-font-smoothing: antialiased;
   }
-  button { font: inherit; cursor: pointer; border: 0; border-radius: 9px;
-           padding: 7px 15px; transition: all .15s ease; }
-  button:active { transform: scale(.97); }
-  .btn-primary { background: linear-gradient(135deg, var(--accent), var(--accent2));
-                 color: #fff; font-weight: 550; box-shadow: 0 2px 12px rgba(90,110,255,.25); }
-  .btn-primary:hover { filter: brightness(1.12); box-shadow: 0 4px 16px rgba(90,110,255,.35); }
-  .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--muted); }
-  .btn-ghost:hover { color: var(--text); border-color: #33405a; background: var(--card); }
-  .btn-danger { background: transparent; border: 1px solid rgba(224,103,103,.35); color: var(--danger); }
-  .btn-danger:hover { background: rgba(224,103,103,.1); }
+
+  button { font: inherit; cursor: pointer; border: 0; background: none; color: inherit;
+           border-radius: 8px; padding: 6px 14px; transition: all .14s ease; }
+  button:active { transform: scale(.96); }
+  .btn-primary { background: #fafafa; color: #0a0a0b; font-weight: 600; }
+  .btn-primary:hover { background: #fff; box-shadow: 0 2px 18px rgba(255,255,255,.14); }
+  .btn-ghost { border: 1px solid var(--border); color: var(--muted); }
+  .btn-ghost:hover { color: var(--text); border-color: rgba(255,255,255,.2); background: var(--card-hover); }
+  .btn-danger { color: var(--faint); }
+  .btn-danger:hover { color: var(--danger); background: rgba(224,103,103,.08); }
   .btn-sm { padding: 4px 11px; font-size: 12.5px; border-radius: 7px; }
+
   input, select {
-    width: 100%; background: #0d1017; border: 1px solid var(--border); color: var(--text);
-    border-radius: 9px; padding: 8px 12px; font: inherit; font-size: 13.5px;
-    transition: border-color .15s;
+    width: 100%; background: rgba(255,255,255,.035); border: 1px solid var(--border);
+    color: var(--text); border-radius: 8px; padding: 8px 12px; font: inherit; font-size: 13.5px;
+    transition: border-color .15s, box-shadow .15s;
   }
   input:focus, select:focus { outline: none; border-color: var(--accent);
-    box-shadow: 0 0 0 3px rgba(109,124,255,.15); }
+    box-shadow: 0 0 0 3px rgba(139,133,255,.16); }
   input::placeholder { color: var(--faint); }
+  label { display: block; font-size: 11.5px; color: var(--muted); margin: 13px 0 5px;
+          font-family: var(--mono); letter-spacing: .02em; }
 
-  /* ---------- sidebar ---------- */
-  aside {
-    width: 264px; min-width: 264px; height: 100vh; overflow-y: auto;
-    background: var(--side); border-right: 1px solid var(--border-soft);
-    display: flex; flex-direction: column; padding: 18px 14px;
-  }
-  .brand { display: flex; align-items: center; gap: 11px; padding: 2px 6px 16px; }
-  .logo { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center;
-          background: linear-gradient(135deg, var(--accent), var(--accent2));
-          color: #fff; font-weight: 700; font-size: 15px;
-          box-shadow: 0 3px 14px rgba(90,110,255,.4); }
-  .brand b { font-size: 16px; display: block; line-height: 1.2; }
-  .brand small { color: var(--faint); font-size: 11px; }
-  #new-btn { width: 100%; margin: 4px 0 16px; }
-  .nav-label { font-size: 11px; color: var(--faint); text-transform: uppercase;
-               letter-spacing: .08em; padding: 12px 8px 6px; }
-  .nav-item {
-    display: flex; align-items: center; gap: 11px; padding: 9px 10px;
-    border-radius: 10px; cursor: pointer; border: 1px solid transparent;
-    transition: background .12s;
-  }
-  .nav-item:hover { background: var(--card); }
-  .nav-item.active { background: var(--card); border-color: var(--border); }
-  .avatar { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center;
-            font-weight: 600; font-size: 13px; color: #fff; flex-shrink: 0; }
-  .nav-item .meta { min-width: 0; flex: 1; }
-  .nav-item .nm { font-weight: 550; font-size: 13.5px; white-space: nowrap;
-                  overflow: hidden; text-overflow: ellipsis; }
-  .nav-item .sub { font-size: 11px; color: var(--faint); white-space: nowrap;
-                   overflow: hidden; text-overflow: ellipsis; }
-  .side-footer { margin-top: auto; padding-top: 14px; }
-  .side-footer button { width: 100%; }
+  /* ---------- top bar ---------- */
+  .topbar { position: sticky; top: 0; z-index: 5; backdrop-filter: blur(14px);
+            background: rgba(10,10,11,.75); border-bottom: 1px solid var(--border-soft); }
+  .topbar-inner { max-width: 780px; margin: 0 auto; padding: 13px 24px;
+                  display: flex; align-items: center; gap: 12px; }
+  .logo { width: 27px; height: 27px; border-radius: 8px; display: grid; place-items: center;
+          background: linear-gradient(135deg, #8b85ff, #5f6cff); color: #fff;
+          font-weight: 700; font-size: 13px; }
+  .topbar b { font-size: 15px; letter-spacing: -.01em; }
+  .topbar .sub { color: var(--faint); font-size: 12px; }
+  .topbar .spacer { flex: 1; }
 
-  /* ---------- main ---------- */
-  main { flex: 1; height: 100vh; overflow-y: auto; padding: 34px 40px 60px; }
-  .empty { height: 100%; display: grid; place-items: center; color: var(--faint); text-align: center; }
-  .empty .big { font-size: 44px; margin-bottom: 12px; opacity: .5; }
-  .detail-head { display: flex; align-items: center; gap: 16px; margin-bottom: 6px; }
-  .detail-head .avatar { width: 46px; height: 46px; border-radius: 13px; font-size: 19px; }
-  .detail-head h1 { font-size: 22px; margin: 0; }
-  .badge { font-size: 11px; color: var(--muted); border: 1px solid var(--border);
-           border-radius: 99px; padding: 2px 10px; }
-  .badge.accent { color: var(--accent); border-color: rgba(109,124,255,.4);
-                  background: rgba(109,124,255,.08); }
-  .home-path { color: var(--faint); font-family: ui-monospace, "SF Mono", monospace;
-               font-size: 12.5px; margin-bottom: 22px; }
-  .actions { display: flex; gap: 9px; margin-bottom: 28px; }
-  h3 { font-size: 13px; color: var(--muted); font-weight: 600; margin: 24px 0 10px;
-       display: flex; align-items: center; gap: 8px; }
-  h3::after { content: ""; flex: 1; height: 1px; background: var(--border-soft); }
-  .envgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 8px; }
-  .envitem { background: var(--card); border: 1px solid var(--border-soft); border-radius: 10px;
-             padding: 8px 13px; display: flex; gap: 10px; align-items: center;
-             font-family: ui-monospace, "SF Mono", monospace; font-size: 12px; }
-  .envitem .k { color: var(--accent2); font-weight: 600; }
-  .envitem .v { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .env-empty { color: var(--faint); font-size: 13px; background: var(--card);
-               border: 1px dashed var(--border); border-radius: 10px; padding: 14px 18px; }
-  .session {
-    display: flex; align-items: center; gap: 14px; padding: 11px 16px;
-    background: var(--card); border: 1px solid var(--border-soft);
-    border-radius: var(--radius); margin-bottom: 8px; transition: all .13s;
-  }
-  .session:hover { background: var(--card-hover); border-color: var(--border); }
-  .session .preview { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden;
-                      text-overflow: ellipsis; font-size: 13.5px; }
-  .session .meta { color: var(--faint); font-size: 11.5px; white-space: nowrap;
-                   font-family: ui-monospace, monospace; }
-  .session .time { color: var(--muted); font-size: 12px; min-width: 64px; text-align: right; }
+  /* ---------- layout ---------- */
+  .wrap { max-width: 780px; margin: 0 auto; padding: 34px 24px 90px; }
+  .page-head { display: flex; align-items: flex-end; justify-content: space-between;
+               margin-bottom: 22px; }
+  .page-head h1 { font-size: 24px; margin: 0; letter-spacing: -.02em; }
+  .page-head .count { color: var(--faint); font-size: 13px; margin-left: 8px; }
+
+  /* ---------- unmanaged banner ---------- */
+  .banner { display: flex; align-items: center; gap: 12px; background: rgba(229,181,103,.06);
+            border: 1px solid rgba(229,181,103,.18); border-radius: 12px;
+            padding: 12px 18px; margin-bottom: 18px; font-size: 13px; color: var(--warn); }
+  .banner .names { color: var(--text); font-family: var(--mono); font-size: 12.5px; }
+  .banner button { margin-left: auto; border-color: rgba(229,181,103,.3); color: var(--warn); }
+  .banner button:hover { background: rgba(229,181,103,.1); color: var(--warn); }
+
+  /* ---------- profile card ---------- */
+  .card { background: var(--card); border: 1px solid var(--border-soft); border-radius: 14px;
+          padding: 18px 20px; margin-bottom: 14px; transition: border-color .15s, background .15s; }
+  .card:hover { border-color: var(--border); }
+  .card-head { display: flex; align-items: center; gap: 13px; }
+  .avatar { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center;
+            font-weight: 650; font-size: 15px; color: rgba(255,255,255,.92); flex-shrink: 0; }
+  .card-head .name { font-size: 16px; font-weight: 620; letter-spacing: -.01em; }
+  .badge { font-size: 11px; font-family: var(--mono); color: var(--accent);
+           background: rgba(139,133,255,.1); border: 1px solid rgba(139,133,255,.22);
+           border-radius: 99px; padding: 1px 9px; }
+  .badge.plain { color: var(--faint); background: none; border-color: var(--border); }
+  .card-head .acts { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+  .home { color: var(--faint); font-family: var(--mono); font-size: 12px; margin: 8px 0 0 51px; }
+  .envchips { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 0 51px; }
+  .chip { font-family: var(--mono); font-size: 11.5px; color: var(--muted);
+          background: rgba(255,255,255,.04); border: 1px solid var(--border-soft);
+          border-radius: 7px; padding: 3px 9px; }
+  .chip b { color: #7fb0ff; font-weight: 600; }
+  .env-none { color: var(--faint); font-size: 12.5px; }
+
+  .test-result { font-size: 12px; font-family: var(--mono); margin-right: 4px; }
+  .test-result.ok { color: var(--ok); }
+  .test-result.bad { color: var(--danger); }
+  .test-result.testing { color: var(--faint); }
+
+  /* ---------- sessions ---------- */
+  .sess-toggle { display: flex; align-items: center; gap: 7px; margin: 14px 0 0 51px;
+                 color: var(--faint); font-size: 12.5px; padding: 0; }
+  .sess-toggle:hover { color: var(--muted); }
+  .sess-toggle .arrow { transition: transform .18s; font-size: 10px; }
+  .sess-toggle.open .arrow { transform: rotate(90deg); }
+  .sess-list { margin: 10px 0 0 51px; border-top: 1px solid var(--border-soft); }
+  .sess { display: flex; align-items: center; gap: 12px; padding: 9px 4px;
+          border-bottom: 1px solid var(--border-soft); }
+  .sess .preview { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden;
+                   text-overflow: ellipsis; font-size: 13px; color: #d4d7de; }
+  .sess .meta { color: var(--faint); font-family: var(--mono); font-size: 11px;
+                max-width: 220px; overflow: hidden; text-overflow: ellipsis;
+                white-space: nowrap; direction: rtl; }
+  .sess .time { color: var(--faint); font-size: 11.5px; min-width: 60px; text-align: right; }
+  .sess-empty { color: var(--faint); font-size: 12.5px; padding: 12px 4px; }
 
   /* ---------- modal ---------- */
-  .backdrop { position: fixed; inset: 0; background: rgba(5,7,11,.66);
-              backdrop-filter: blur(3px); display: grid; place-items: center; z-index: 10; }
-  .modal { width: 620px; max-width: 94vw; max-height: 88vh; overflow-y: auto;
-           background: #11151e; border: 1px solid var(--border); border-radius: 16px;
-           padding: 24px 26px; box-shadow: 0 24px 70px rgba(0,0,0,.55); }
-  .modal h2 { margin: 0 0 4px; font-size: 17px; }
-  .modal .hint { color: var(--faint); font-size: 12.5px; margin-bottom: 14px; }
-  label { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 5px; }
+  .backdrop { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center;
+              background: rgba(0,0,0,.6); backdrop-filter: blur(4px); }
+  .modal { width: 600px; max-width: 93vw; max-height: 86vh; overflow-y: auto;
+           background: #121215; border: 1px solid var(--border); border-radius: 16px;
+           padding: 26px 28px; box-shadow: 0 30px 90px rgba(0,0,0,.6); }
+  .modal h2 { margin: 0; font-size: 17px; letter-spacing: -.01em; }
+  .modal .hint { color: var(--faint); font-size: 12.5px; margin: 6px 0 4px; line-height: 1.7; }
+  .modal .hint code { font-family: var(--mono); font-size: 11.5px; color: var(--muted);
+                      background: rgba(255,255,255,.05); padding: 1px 6px; border-radius: 5px; }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
   .kvrow { display: grid; grid-template-columns: 1fr 1.3fr 30px; gap: 8px; margin-top: 8px; }
-  .kvrow button { padding: 0; height: 34px; align-self: end; }
-  .modal-foot { display: flex; justify-content: flex-end; gap: 9px; margin-top: 20px;
+  .kvrow button { padding: 0; height: 35px; align-self: end; }
+  .modal-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px;
                 padding-top: 16px; border-top: 1px solid var(--border-soft); }
   .form-err { color: var(--danger); font-size: 12.5px; margin-top: 10px; }
 
   /* ---------- toast ---------- */
-  #toast { position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%) translateY(20px);
-           background: #1c2330; border: 1px solid var(--border); color: var(--text);
-           border-radius: 10px; padding: 10px 18px; font-size: 13px; opacity: 0;
-           transition: all .25s ease; pointer-events: none; z-index: 20;
-           box-shadow: 0 10px 34px rgba(0,0,0,.5); }
+  #toast { position: fixed; bottom: 28px; left: 50%; z-index: 30;
+           transform: translateX(-50%) translateY(16px);
+           background: #1a1a1e; border: 1px solid var(--border); border-radius: 99px;
+           padding: 9px 20px; font-size: 13px; opacity: 0; pointer-events: none;
+           transition: all .25s cubic-bezier(.2,.9,.3,1.2); box-shadow: 0 12px 40px rgba(0,0,0,.5); }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-  #toast.err { border-color: rgba(224,103,103,.5); color: #f0b0b0; }
-  #toast.ok { border-color: rgba(95,206,143,.4); }
+  #toast.err { border-color: rgba(224,103,103,.45); color: #f0b3b3; }
+  #toast.ok { border-color: rgba(78,203,141,.35); }
   ::-webkit-scrollbar { width: 9px; }
-  ::-webkit-scrollbar-thumb { background: #232a38; border-radius: 99px; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.1); border-radius: 99px; }
 </style>
 </head>
 <body>
-<aside>
-  <div class="brand">
-    <div class="logo">⌘</div>
-    <div><b>ccp</b><small>Claude Code Profiles</small></div>
-  </div>
-  <button id="new-btn" class="btn-primary">+ 新建 profile</button>
-  <div class="nav-label">Profiles</div>
-  <nav id="profile-nav"></nav>
-  <div id="unmanaged-wrap" hidden>
-    <div class="nav-label">发现的未托管目录</div>
-    <div id="unmanaged-list"></div>
-  </div>
-  <div class="side-footer">
-    <button id="shared-btn" class="btn-ghost btn-sm" style="color:var(--faint)">共享变量(高级)</button>
-  </div>
-</aside>
 
-<main id="detail">
-  <div class="empty"><div><div class="big">⌘</div>选择一个 profile,或新建一个</div></div>
-</main>
+<div class="topbar">
+  <div class="topbar-inner">
+    <div class="logo">⌘</div>
+    <b>ccp</b>
+    <span class="sub">每个 API 源一个隔离家目录,会话永不串</span>
+    <div class="spacer"></div>
+    <button class="btn-ghost btn-sm" id="export-btn">导出</button>
+    <button class="btn-ghost btn-sm" id="import-btn">导入</button>
+    <button class="btn-ghost btn-sm" id="shared-btn" title="所有 profile 共用的环境变量">共享变量</button>
+  </div>
+</div>
+
+<div class="wrap">
+  <div class="page-head">
+    <div><h1>Profiles<span class="count" id="count"></span></h1></div>
+    <button class="btn-primary" id="new-btn">+ 新建 profile</button>
+  </div>
+  <div id="unmanaged-wrap" hidden></div>
+  <div id="profile-list"></div>
+</div>
+
+<input type="file" id="import-file" accept=".json" hidden>
 
 <div id="modal-backdrop" class="backdrop" hidden>
   <div class="modal">
     <h2 id="editor-title">新建 profile</h2>
-    <div class="hint" id="editor-hint">每个 profile 一个独立家目录 ~/.claude-&lt;name&gt;,会话互不干扰</div>
+    <div class="hint">每个 profile 一个独立家目录 <code>~/.claude-&lt;name&gt;</code>,会话、登录、配置互不影响</div>
     <div id="create-only">
       <label>名称(小写字母/数字/连字符)</label>
       <input id="f-name" placeholder="kimi">
@@ -195,10 +208,10 @@
 
 <div id="shared-backdrop" class="backdrop" hidden>
   <div class="modal">
-    <h2>共享环境变量 <span class="badge">高级功能,可留空</span></h2>
+    <h2>共享环境变量 <span class="badge plain">高级,可留空</span></h2>
     <div class="hint">
       在这里配置的变量,启动<b>任何</b> profile 时都会自动带上,不用每个 profile 各配一遍。<br>
-      例:<code style="font-family:ui-monospace,monospace">CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = 1</code>(所有源统一关闭遥测流量)。<br>
+      例:<code>CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = 1</code>(所有源统一关闭遥测流量)。<br>
       如果某个 profile 自己配了同名变量,以 profile 自己的值为准。<b>没有这类需求就空着,不影响任何使用。</b>
     </div>
     <div id="shared-list"></div>
@@ -226,9 +239,8 @@ const STD_FIELDS = [
 ];
 const STD_KEYS = new Set(STD_FIELDS.map(([, k]) => k));
 let presets = [];
-let profilesCache = [];
-let selected = null;   // currently displayed profile name
-let editing = null;    // profile name when editing, null when creating
+let editing = null;
+const openSess = new Set();   // profile names with sessions expanded
 
 /* ---------- helpers ---------- */
 async function api(path, opts = {}) {
@@ -249,9 +261,9 @@ function hueOf(name) {
   for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360;
   return h;
 }
-function avatarHtml(name, cls = "avatar") {
+function avatarHtml(name) {
   const h = hueOf(name);
-  return `<div class="${cls}" style="background:linear-gradient(135deg,hsl(${h},62%,52%),hsl(${(h+40)%360},62%,42%))">${esc(name[0].toUpperCase())}</div>`;
+  return `<div class="avatar" style="background:linear-gradient(135deg,hsl(${h},48%,52%),hsl(${(h+36)%360},48%,40%))">${esc(name[0].toUpperCase())}</div>`;
 }
 function relTime(secs) {
   const d = Date.now() / 1000 - secs;
@@ -266,90 +278,107 @@ function toast(text, kind = "") {
   el.textContent = text;
   el.className = `show ${kind}`;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.className = "", 2600);
+  toastTimer = setTimeout(() => el.className = "", 2800);
 }
 
 /* ---------- load & render ---------- */
 async function loadAll() {
   const [presetList, data] = await Promise.all([api("/api/presets"), api("/api/profiles")]);
   presets = presetList;
-  profilesCache = data.profiles;
   renderPresetSelect();
-  renderNav(data.profiles);
   renderUnmanaged(data.unmanaged);
-  if (selected && profilesCache.some(p => p.name === selected)) renderDetail(selected);
-  else if (!selected && profilesCache.length) renderDetail(profilesCache[0].name);
-}
-
-function renderNav(profiles) {
-  document.getElementById("profile-nav").innerHTML = profiles.map(p => `
-    <div class="nav-item ${p.name === selected ? "active" : ""}" onclick="renderDetail('${esc(p.name)}')">
-      ${avatarHtml(p.name)}
-      <div class="meta">
-        <div class="nm">${esc(p.name)}</div>
-        <div class="sub">${p.preset ? esc(p.preset) : esc(p.home)}</div>
-      </div>
-    </div>`).join("");
+  renderProfiles(data.profiles);
 }
 
 function renderUnmanaged(list) {
   const wrap = document.getElementById("unmanaged-wrap");
   wrap.hidden = !list.length;
-  document.getElementById("unmanaged-list").innerHTML = list.map(u => `
-    <div class="nav-item">
-      ${avatarHtml(u.name)}
-      <div class="meta"><div class="nm">${esc(u.name)}</div><div class="sub">未托管</div></div>
-      <button class="btn-ghost btn-sm" onclick="importDir('${esc(u.name)}')">导入</button>
-    </div>`).join("");
+  if (!list.length) return;
+  wrap.innerHTML = `
+    <div class="banner">
+      <span>发现 <span class="names">${list.map(u => "~/.claude-" + esc(u.name)).join("、")}</span>
+      共 ${list.length} 个未托管目录</span>
+      <button class="btn-ghost btn-sm" onclick="importAll(${esc(JSON.stringify(list.map(u => u.name))).replace(/"/g, "&quot;")})">全部导入</button>
+    </div>`;
 }
 
-async function renderDetail(name) {
-  selected = name;
-  renderNav(profilesCache);
-  const p = profilesCache.find(x => x.name === name);
-  if (!p) return;
-  const main = document.getElementById("detail");
-  const envItems = Object.entries(p.env);
-  main.innerHTML = `
-    <div class="detail-head">
-      ${avatarHtml(p.name)}
-      <h1>${esc(p.name)}</h1>
-      ${p.preset ? `<span class="badge accent">${esc(p.preset)}</span>` : ""}
-      ${p.managed ? "" : '<span class="badge">未托管</span>'}
-    </div>
-    <div class="home-path">${esc(p.home)}</div>
-    <div class="actions">
-      <button class="btn-primary" onclick="doLaunch('${esc(p.name)}')">▶ 新会话</button>
-      <button class="btn-ghost" onclick="openEditor('${esc(p.name)}')">编辑配置</button>
-      ${p.name === "default" ? "" :
-        `<button class="btn-danger" onclick="delProfile('${esc(p.name)}')">删除</button>`}
-    </div>
-    <h3>环境变量</h3>
-    ${envItems.length ? `<div class="envgrid">${envItems.map(([k, v]) =>
-        `<div class="envitem"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join("")}</div>`
-      : '<div class="env-empty">无额外变量 — 使用该目录自身的配置(官方登录 / settings.json)</div>'}
-    <h3>历史会话</h3>
-    <div id="session-list"><div class="env-empty">加载中…</div></div>`;
-  try {
-    const list = await api(`/api/profiles/${encodeURIComponent(name)}/sessions`);
-    const el = document.getElementById("session-list");
-    if (!el) return; // user navigated away
-    el.innerHTML = list.length ? list.map(s => `
-      <div class="session">
-        <div class="preview">${esc(s.preview)}</div>
-        ${s.cwd ? `<div class="meta" title="${esc(s.cwd)}">…${esc(s.cwd.slice(-32))}</div>` : ""}
-        <div class="time">${relTime(s.modified)}</div>
-        <button class="btn-ghost btn-sm"
-          onclick="doResume('${esc(name)}','${esc(s.id)}','${esc(s.cwd || "")}')">续聊</button>
-      </div>`).join("")
-      : '<div class="env-empty">还没有历史会话</div>';
-  } catch (e) {
-    const el = document.getElementById("session-list");
-    if (el) el.innerHTML = `<div class="env-empty">加载失败:${esc(e.message)}</div>`;
+function renderProfiles(profiles) {
+  document.getElementById("count").textContent = profiles.length ? `${profiles.length} 个` : "";
+  const el = document.getElementById("profile-list");
+  if (!profiles.length) {
+    el.innerHTML = '<div class="card env-none" style="padding:26px">还没有 profile,点右上角"新建"开始</div>';
+    return;
+  }
+  el.innerHTML = profiles.map(p => {
+    const chips = Object.entries(p.env);
+    return `
+    <div class="card" id="card-${esc(p.name)}">
+      <div class="card-head">
+        ${avatarHtml(p.name)}
+        <span class="name">${esc(p.name)}</span>
+        ${p.preset ? `<span class="badge">${esc(p.preset)}</span>` : ""}
+        ${p.managed ? "" : '<span class="badge plain">未托管</span>'}
+        <div class="acts">
+          <span class="test-result" id="test-${esc(p.name)}"></span>
+          <button class="btn-ghost btn-sm" onclick="doTest('${esc(p.name)}')">测试</button>
+          <button class="btn-primary btn-sm" onclick="doLaunch('${esc(p.name)}')">▶ 启动</button>
+          <button class="btn-ghost btn-sm" onclick="openEditor('${esc(p.name)}')">编辑</button>
+          ${p.name === "default" ? "" :
+            `<button class="btn-danger btn-sm" onclick="delProfile('${esc(p.name)}')">删除</button>`}
+        </div>
+      </div>
+      <div class="home">${esc(p.home)}</div>
+      <div class="envchips">
+        ${chips.length ? chips.map(([k, v]) =>
+          `<span class="chip"><b>${esc(k)}</b> = ${esc(v)}</span>`).join("")
+          : '<span class="env-none">无额外变量 — 用该目录自身配置(官方登录 / settings.json)</span>'}
+      </div>
+      <button class="sess-toggle ${openSess.has(p.name) ? "open" : ""}"
+              id="toggle-${esc(p.name)}" onclick="toggleSessions('${esc(p.name)}')">
+        <span class="arrow">▶</span> 历史会话
+      </button>
+      <div class="sess-list" id="sess-${esc(p.name)}" ${openSess.has(p.name) ? "" : "hidden"}></div>
+    </div>`;
+  }).join("");
+  for (const name of openSess) loadSessions(name);
+}
+
+async function toggleSessions(name) {
+  const list = document.getElementById(`sess-${name}`);
+  const toggle = document.getElementById(`toggle-${name}`);
+  if (openSess.has(name)) {
+    openSess.delete(name);
+    list.hidden = true;
+    toggle.classList.remove("open");
+  } else {
+    openSess.add(name);
+    list.hidden = false;
+    toggle.classList.add("open");
+    await loadSessions(name);
   }
 }
 
-/* ---------- launch ---------- */
+async function loadSessions(name) {
+  const list = document.getElementById(`sess-${name}`);
+  if (!list) return;
+  list.innerHTML = '<div class="sess-empty">扫描中…</div>';
+  try {
+    const items = await api(`/api/profiles/${encodeURIComponent(name)}/sessions`);
+    list.innerHTML = items.length ? items.map(s => `
+      <div class="sess">
+        <span class="preview">${esc(s.preview)}</span>
+        ${s.cwd ? `<span class="meta" title="${esc(s.cwd)}">${esc(s.cwd)}</span>` : ""}
+        <span class="time">${relTime(s.modified)}</span>
+        <button class="btn-ghost btn-sm"
+          onclick="doResume('${esc(name)}','${esc(s.id)}','${esc(s.cwd || "")}')">续聊</button>
+      </div>`).join("")
+      : '<div class="sess-empty">还没有历史会话</div>';
+  } catch (e) {
+    list.innerHTML = `<div class="sess-empty">加载失败:${esc(e.message)}</div>`;
+  }
+}
+
+/* ---------- actions ---------- */
 async function doLaunch(name) {
   try {
     await api(`/api/profiles/${encodeURIComponent(name)}/launch`, { method: "POST", body: "{}" });
@@ -361,6 +390,90 @@ async function doResume(name, id, cwd) {
     await api(`/api/profiles/${encodeURIComponent(name)}/launch`,
       { method: "POST", body: JSON.stringify({ resume: id, cwd: cwd || null }) });
     toast("已在新终端窗口续聊", "ok");
+  } catch (e) { toast(e.message, "err"); }
+}
+async function doTest(name) {
+  const el = document.getElementById(`test-${name}`);
+  el.className = "test-result testing";
+  el.textContent = "测试中…";
+  try {
+    const r = await api(`/api/profiles/${encodeURIComponent(name)}/test`,
+      { method: "POST", body: "{}" });
+    if (r.auth === "ok") {
+      el.className = "test-result ok";
+      el.textContent = `✓ ${r.latency_ms}ms`;
+    } else if (r.auth === "failed") {
+      el.className = "test-result bad";
+      el.textContent = `✗ 鉴权失败 ${r.http_status}`;
+    } else {
+      el.className = "test-result testing";
+      el.textContent = `? ${r.latency_ms}ms HTTP ${r.http_status}`;
+      el.title = "端点可达,但无法确认鉴权(可能未配 token)";
+    }
+  } catch (e) {
+    el.className = "test-result bad";
+    el.textContent = "✗ 连不通";
+    el.title = e.message;
+  }
+}
+async function delProfile(name) {
+  if (!confirm(`删除 profile "${name}"?\n\n~/.claude-${name} 目录和历史会话保留,仅解除托管。`)) return;
+  try {
+    await api(`/api/profiles/${encodeURIComponent(name)}?confirm=true`, { method: "DELETE" });
+    openSess.delete(name);
+    toast("已删除", "ok");
+    await loadAll();
+  } catch (e) { toast(e.message, "err"); }
+}
+async function importAll(names) {
+  for (const name of names) {
+    try { await api("/api/profiles/import", { method: "POST", body: JSON.stringify({ name }) }); }
+    catch (e) { toast(`${name}:${e.message}`, "err"); return; }
+  }
+  toast("已全部导入", "ok");
+  await loadAll();
+}
+
+/* ---------- export / import ---------- */
+async function doExport() {
+  const withSecrets = confirm(
+    "导出全部 profile 配置?\n\n「确定」= 包含 token 明文(文件请妥善保管)\n「取消」= token 脱敏(导入后需重新填写 token)");
+  try {
+    const data = await api(`/api/export${withSecrets ? "?include_secrets=true" : ""}`);
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `ccp-profiles-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast(withSecrets ? "已导出(含明文 token)" : "已导出(token 已脱敏)", "ok");
+  } catch (e) { toast(e.message, "err"); }
+}
+function pickImport() { document.getElementById("import-file").click(); }
+async function doImportFile(ev) {
+  const file = ev.target.files[0];
+  ev.target.value = "";
+  if (!file) return;
+  let data;
+  try { data = JSON.parse(await file.text()); }
+  catch { toast("文件不是有效 JSON", "err"); return; }
+  if (!Array.isArray(data.profiles)) { toast("文件缺少 profiles 数组", "err"); return; }
+  const overwrite = confirm("遇到同名 profile 时:\n\n「确定」= 覆盖合并\n「取消」= 跳过");
+  try {
+    const r = await api("/api/import", {
+      method: "POST",
+      body: JSON.stringify({
+        profiles: data.profiles, shared: data.shared,
+        policy: overwrite ? "overwrite" : "skip",
+      }),
+    });
+    const parts = [];
+    if (r.created.length) parts.push(`新建 ${r.created.length}`);
+    if (r.updated.length) parts.push(`更新 ${r.updated.length}`);
+    if (r.skipped.length) parts.push(`跳过 ${r.skipped.length}`);
+    if (r.errors.length) parts.push(`失败 ${r.errors.length}`);
+    toast(`导入完成:${parts.join("、") || "无变化"}`, r.errors.length ? "err" : "ok");
+    await loadAll();
   } catch (e) { toast(e.message, "err"); }
 }
 
@@ -424,7 +537,8 @@ async function openEditor(name) {
   document.getElementById("f-name").value = "";
   document.getElementById("f-preset").value = "";
   if (editing) {
-    const p = profilesCache.find(x => x.name === editing);
+    const { profiles } = await api("/api/profiles");
+    const p = profiles.find(x => x.name === editing);
     if (!p) return;
     for (const [id, key] of STD_FIELDS)
       if (p.env[key]) document.getElementById(id).placeholder = p.env[key] + "(留空不变)";
@@ -450,7 +564,6 @@ async function saveEditor() {
       const name = document.getElementById("f-name").value.trim();
       const preset = document.getElementById("f-preset").value || null;
       await api("/api/profiles", { method: "POST", body: JSON.stringify({ name, preset, env }) });
-      selected = name;
     }
     document.getElementById("modal-backdrop").hidden = true;
     toast("已保存", "ok");
@@ -484,25 +597,7 @@ async function saveShared() {
   } catch (e) { msg.textContent = e.message; }
 }
 
-/* ---------- misc actions ---------- */
-async function delProfile(name) {
-  if (!confirm(`删除 profile "${name}"?\n\n~/.claude-${name} 目录和历史会话保留,仅解除托管。`)) return;
-  try {
-    await api(`/api/profiles/${encodeURIComponent(name)}?confirm=true`, { method: "DELETE" });
-    if (selected === name) selected = "default";
-    toast("已删除", "ok");
-    await loadAll();
-  } catch (e) { toast(e.message, "err"); }
-}
-async function importDir(name) {
-  try {
-    await api("/api/profiles/import", { method: "POST", body: JSON.stringify({ name }) });
-    toast(`已导入 ${name}`, "ok");
-    selected = name;
-    await loadAll();
-  } catch (e) { toast(e.message, "err"); }
-}
-
+/* ---------- wiring ---------- */
 document.getElementById("new-btn").onclick = () => openEditor(null);
 document.getElementById("editor-cancel").onclick = () =>
   document.getElementById("modal-backdrop").hidden = true;
@@ -513,6 +608,9 @@ document.getElementById("shared-add").onclick = () => kvRow("shared-list");
 document.getElementById("shared-save").onclick = saveShared;
 document.getElementById("shared-cancel").onclick = () =>
   document.getElementById("shared-backdrop").hidden = true;
+document.getElementById("export-btn").onclick = doExport;
+document.getElementById("import-btn").onclick = pickImport;
+document.getElementById("import-file").onchange = doImportFile;
 for (const id of ["modal-backdrop", "shared-backdrop"]) {
   document.getElementById(id).addEventListener("click", e => {
     if (e.target.id === id) e.target.hidden = true;
