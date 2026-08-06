@@ -1,0 +1,18 @@
+[package]
+name = "ccp"
+version = "0.1.0"
+edition = "2021"
+description = "Claude Code Profiles — isolated per-provider configs with a local web GUI"
+license = "MIT"
+
+[dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+clap = { version = "4", features = ["derive"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+tempfile = "3"

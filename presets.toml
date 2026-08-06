@@ -1,0 +1,185 @@
+# ccp provider presets — field shape mirrors cc-switch's providerPresets
+# (category / website_url / api_key_url / api_format / env) so the table can
+# be synced from upstream. Base URLs were ported from cc-switch's preset
+# source; re-verify against each vendor's docs when editing.
+
+[[preset]]
+key = "anthropic"
+label = "Anthropic (official)"
+category = "official"
+website_url = "https://www.anthropic.com"
+api_key_url = "https://console.anthropic.com/settings/keys"
+api_format = "anthropic"
+[preset.env]
+# Official login needs no base URL; leave env empty.
+
+[[preset]]
+key = "moonshot"
+label = "Kimi (Moonshot)"
+category = "cn_official"
+website_url = "https://platform.moonshot.cn"
+api_key_url = "https://platform.moonshot.cn/console/api-keys"
+api_format = "anthropic"
+[preset.env]
+ANTHROPIC_BASE_URL = "https://api.moonshot.cn/anthropic"
+
+[[preset]]
+key = "moonshot-coding"
+label = "Kimi For Coding"
+category = "cn_official"
+api_format = "anthropic"
+[preset.env]
+ANTHROPIC_BASE_URL = "https://api.kimi.com/coding/"
+CLAUDE_CODE_MAX_CONTEXT_TOKENS = "262144"
+
+[[preset]]
+key = "deepseek"
+label = "DeepSeek"
+category = "cn_official"
+website_url = "https://www.deepseek.com"
+api_format = "anthropic"
+[preset.env]
+ANTHROPIC_BASE_URL = "https://api.deepseek.com/anthropic"
+
+[[preset]]
+key = "zhipu"
+label = "Zhipu GLM"
+category = "cn_official"
+website_url = "https://open.bigmodel.cn"
+api_format = "anthropic"
+[preset.env]
+ANTHROPIC_BASE_URL = "https://open.bigmodel.cn/api/anthropic"
+
+[[preset]]
+key = "zhipu-intl"
+label = "Zhipu GLM (intl)"
+category = "cn_official"
+api_format = "anthropic"
+[preset.env]
+ANTHROPIC_BASE_URL = "https://api.z.ai/api/anthropic"
+
+[[preset]]
+key = "bailian"
+label = "Alibaba Bailian"
+category = "cloud_provider"
+api_format = "anthropic"
+[preset.env]
+ANTHROPIC_BASE_URL = "https://dashscope.aliyuncs.com/apps/anthropic"
+
+[[preset]]
+key = "openrouter"
+label = "OpenRouter"
+category = "aggregator"
+website_url = "https://openrouter.ai"
+api_key_url = "https://openrouter.ai/keys"
+api_format = "anthropic"
+[preset.env]
+ANTHROPIC_BASE_URL = "https://openrouter.ai/api"
+
+[[preset]]
+key = "siliconflow"
+label = "SiliconFlow"
+category = "aggregator"
+website_url = "https://siliconflow.cn"
+api_format = "anthropic"
+[preset.env]
+ANTHROPIC_BASE_URL = "https://api.siliconflow.cn"
+
+[[preset]]
+key = "atlascloud"
+label = "AtlasCloud"
+category = "aggregator"
+website_url = "https://www.atlascloud.ai"
+api_format = "anthropic"
+[preset.env]
+ANTHROPIC_BASE_URL = "https://api.atlascloud.ai"
+
+[[preset]]
+key = "minimax"
+label = "MiniMax"
+category = "cn_official"
+website_url = "https://www.minimaxi.com"
+api_format = "anthropic"
+[preset.env]
+ANTHROPIC_BASE_URL = "https://api.minimaxi.com/anthropic"
+
+[[preset]]
+key = "volcengine-ark"
+label = "Volcengine Ark (coding)"
+category = "cloud_provider"
+api_format = "anthropic"
+[preset.env]
+ANTHROPIC_BASE_URL = "https://ark.cn-beijing.volces.com/api/coding"
+
+[[preset]]
+key = "baidu-qianfan"
+label = "Baidu Qianfan (coding)"
+category = "cloud_provider"
+api_format = "anthropic"
+[preset.env]
+ANTHROPIC_BASE_URL = "https://qianfan.baidubce.com/anthropic/coding"
+
+[[preset]]
+key = "modelscope"
+label = "ModelScope"
+category = "cn_official"
+website_url = "https://www.modelscope.cn"
+api_format = "anthropic"
+[preset.env]
+ANTHROPIC_BASE_URL = "https://api-inference.modelscope.cn"
+
+[[preset]]
+key = "stepfun"
+label = "StepFun"
+category = "cn_official"
+api_format = "anthropic"
+[preset.env]
+ANTHROPIC_BASE_URL = "https://api.stepfun.com/step_plan"
+
+[[preset]]
+key = "longcat"
+label = "Longcat"
+category = "cn_official"
+api_format = "anthropic"
+[preset.env]
+ANTHROPIC_BASE_URL = "https://api.longcat.chat/anthropic"
+
+[[preset]]
+key = "xiaomi-mimo"
+label = "Xiaomi MiMo"
+category = "cn_official"
+api_format = "anthropic"
+[preset.env]
+ANTHROPIC_BASE_URL = "https://api.xiaomimimo.com/anthropic"
+
+[[preset]]
+key = "aihubmix"
+label = "AiHubMix"
+category = "aggregator"
+api_format = "anthropic"
+[preset.env]
+ANTHROPIC_BASE_URL = "https://aihubmix.com"
+
+[[preset]]
+key = "dmxapi"
+label = "DMXAPI"
+category = "aggregator"
+api_format = "anthropic"
+[preset.env]
+ANTHROPIC_BASE_URL = "https://www.dmxapi.cn"
+
+[[preset]]
+key = "packycode"
+label = "PackyCode"
+category = "third_party"
+api_format = "anthropic"
+[preset.env]
+ANTHROPIC_BASE_URL = "https://www.packyapi.ai"
+
+[[preset]]
+key = "custom"
+label = "Custom"
+category = "third_party"
+api_format = "anthropic"
+[preset.env]
+# Blank on purpose — fill in your own endpoint.

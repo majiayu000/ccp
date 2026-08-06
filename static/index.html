@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ccp — Claude Code Profiles</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 -apple-system, "SF Pro", "PingFang SC", sans-serif;
+         background: #0f1115; color: #e6e6e6; }
+  header { padding: 14px 24px; border-bottom: 1px solid #23262e; display: flex; gap: 10px; align-items: baseline; }
+  header h1 { font-size: 18px; margin: 0; }
+  header span { color: #8a8f9a; }
+  main { max-width: 960px; margin: 0 auto; padding: 20px 24px 60px; }
+  h2 { font-size: 15px; margin: 28px 0 10px; color: #aeb4bf; }
+  .card { background: #171a21; border: 1px solid #23262e; border-radius: 10px;
+          padding: 12px 16px; margin-bottom: 10px; }
+  .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .name { font-weight: 600; font-size: 15px; }
+  .badge { font-size: 11px; color: #8a8f9a; border: 1px solid #2c303a; border-radius: 99px; padding: 1px 8px; }
+  .home { color: #6f7684; font-family: ui-monospace, monospace; font-size: 12px; }
+  .envchip { font-family: ui-monospace, monospace; font-size: 11px; background: #1e222b;
+             border-radius: 6px; padding: 2px 8px; color: #9aa3b2; }
+  button { background: #2563eb; color: #fff; border: 0; border-radius: 8px;
+           padding: 6px 14px; cursor: pointer; font-size: 13px; }
+  button.ghost { background: transparent; border: 1px solid #2c303a; color: #aeb4bf; }
+  button.danger { background: transparent; border: 1px solid #7f2d2d; color: #e07a7a; }
+  button:hover { filter: brightness(1.15); }
+  input, select { background: #10131a; border: 1px solid #2c303a; color: #e6e6e6;
+                  border-radius: 8px; padding: 7px 10px; font-size: 13px; width: 100%; }
+  label { display: block; font-size: 12px; color: #8a8f9a; margin: 10px 0 4px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+  .kvrow { display: grid; grid-template-columns: 1fr 1.4fr auto; gap: 8px; margin-top: 8px; }
+  .muted { color: #6f7684; font-size: 12px; }
+  .err { color: #e07a7a; font-size: 12px; margin-top: 8px; white-space: pre-wrap; }
+  .ok { color: #6fcf97; font-size: 12px; margin-top: 8px; }
+  #editor { border-color: #2563eb; }
+  .spacer { flex: 1; }
+</style>
+</head>
+<body>
+<header><h1>ccp</h1><span>Claude Code Profiles — 每个源一个隔离家目录</span></header>
+<main>
+  <h2>Profiles</h2>
+  <div id="profile-list"><p class="muted">loading…</p></div>
+  <div id="unmanaged-wrap" hidden>
+    <h2>发现的未托管目录</h2>
+    <div id="unmanaged-list"></div>
+  </div>
+  <button id="new-btn">+ 新建 profile</button>
+
+  <section id="editor" class="card" hidden>
+    <div class="row"><b id="editor-title">新建 profile</b><div class="spacer"></div>
+      <button class="ghost" id="editor-cancel">取消</button></div>
+    <div id="create-only">
+      <label>名称(目录 ~/.claude-&lt;name&gt;,小写字母/数字/连字符)</label>
+      <input id="f-name" placeholder="kimi">
+      <label>预设(选中自动填充,可改)</label>
+      <select id="f-preset"></select>
+    </div>
+    <div class="grid2">
+      <div><label>ANTHROPIC_BASE_URL</label><input id="f-base" placeholder="https://…"></div>
+      <div><label>ANTHROPIC_AUTH_TOKEN</label><input id="f-token" placeholder="sk-…"></div>
+      <div><label>ANTHROPIC_MODEL</label><input id="f-model"></div>
+      <div><label>ANTHROPIC_SMALL_FAST_MODEL</label><input id="f-small"></div>
+      <div><label>DEFAULT_HAIKU_MODEL</label><input id="f-haiku"></div>
+      <div><label>DEFAULT_SONNET_MODEL</label><input id="f-sonnet"></div>
+      <div><label>DEFAULT_OPUS_MODEL</label><input id="f-opus"></div>
+      <div><label>MAX_CONTEXT_TOKENS</label><input id="f-ctx"></div>
+    </div>
+    <label>高级(任意其他环境变量)</label>
+    <div id="kv-list"></div>
+    <button class="ghost" id="kv-add" style="margin-top:8px">+ 添加变量</button>
+    <div class="row" style="margin-top:14px">
+      <button id="editor-save">保存</button>
+      <span id="editor-msg"></span>
+    </div>
+  </section>
+
+  <h2>共享环境变量(叠加到所有 profile,profile 自己的值优先)</h2>
+  <div class="card">
+    <div id="shared-list"></div>
+    <button class="ghost" id="shared-add" style="margin-top:8px">+ 添加变量</button>
+    <div class="row" style="margin-top:12px">
+      <button id="shared-save">保存共享变量</button>
+      <span id="shared-msg"></span>
+    </div>
+  </div>
+</main>
+
+<script>
+const STD_FIELDS = [
+  ["f-base",  "ANTHROPIC_BASE_URL"],
+  ["f-token", "ANTHROPIC_AUTH_TOKEN"],
+  ["f-model", "ANTHROPIC_MODEL"],
+  ["f-small", "ANTHROPIC_SMALL_FAST_MODEL"],
+  ["f-haiku", "ANTHROPIC_DEFAULT_HAIKU_MODEL"],
+  ["f-sonnet","ANTHROPIC_DEFAULT_SONNET_MODEL"],
+  ["f-opus",  "ANTHROPIC_DEFAULT_OPUS_MODEL"],
+  ["f-ctx",   "CLAUDE_CODE_MAX_CONTEXT_TOKENS"],
+];
+const STD_KEYS = new Set(STD_FIELDS.map(([, k]) => k));
+let presets = [];
+let editing = null; // profile name when editing, null when creating
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    headers: { "content-type": "application/json" },
+    ...opts,
+  });
+  if (!res.ok) {
+    let msg = res.statusText;
+    try { msg = (await res.json()).error || msg; } catch (_) {}
+    throw new Error(msg);
+  }
+  if (res.status === 204) return null;
+  return res.json();
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+async function loadAll() {
+  const [presetList, data, shared] = await Promise.all([
+    api("/api/presets"), api("/api/profiles"), api("/api/shared"),
+  ]);
+  presets = presetList;
+  renderPresetSelect();
+  renderProfiles(data.profiles);
+  renderUnmanaged(data.unmanaged);
+  renderShared(shared);
+}
+
+function renderProfiles(profiles) {
+  const el = document.getElementById("profile-list");
+  if (!profiles.length) { el.innerHTML = '<p class="muted">还没有 profile</p>'; return; }
+  el.innerHTML = profiles.map(p => `
+    <div class="card">
+      <div class="row">
+        <span class="name">${esc(p.name)}</span>
+        ${p.preset ? `<span class="badge">${esc(p.preset)}</span>` : ""}
+        ${p.managed ? "" : '<span class="badge">未托管</span>'}
+        <span class="home">${esc(p.home)}</span>
+        <div class="spacer"></div>
+        <button class="ghost" onclick="openEditor('${esc(p.name)}')">编辑</button>
+        ${p.name === "default" ? "" :
+          `<button class="danger" onclick="delProfile('${esc(p.name)}')">删除</button>`}
+      </div>
+      <div class="row" style="margin-top:8px">
+        ${Object.entries(p.env).map(([k, v]) =>
+          `<span class="envchip">${esc(k)}=${esc(v)}</span>`).join("") ||
+          '<span class="muted">无环境变量(用 ~/.claude 自身配置 / 官方登录)</span>'}
+      </div>
+    </div>`).join("");
+}
+
+function renderUnmanaged(list) {
+  const wrap = document.getElementById("unmanaged-wrap");
+  const el = document.getElementById("unmanaged-list");
+  wrap.hidden = !list.length;
+  el.innerHTML = list.map(u => `
+    <div class="card row">
+      <span class="name">${esc(u.name)}</span>
+      <span class="home">${esc(u.home)}</span>
+      <div class="spacer"></div>
+      <button class="ghost" onclick="importDir('${esc(u.name)}')">导入为 profile</button>
+    </div>`).join("");
+}
+
+function renderPresetSelect() {
+  const sel = document.getElementById("f-preset");
+  const groups = {};
+  for (const p of presets) (groups[p.category] ??= []).push(p);
+  sel.innerHTML = '<option value="">— 不选预设 —</option>' +
+    Object.entries(groups).map(([cat, items]) =>
+      `<optgroup label="${esc(cat)}">` + items.map(p =>
+        `<option value="${esc(p.key)}">${esc(p.label)}</option>`).join("") +
+      "</optgroup>").join("");
+  sel.onchange = () => {
+    const p = presets.find(x => x.key === sel.value);
+    if (!p) return;
+    clearStdFields();
+    for (const [id, key] of STD_FIELDS) {
+      if (p.env[key]) document.getElementById(id).value = p.env[key];
+    }
+  };
+}
+
+function clearStdFields() {
+  for (const [id] of STD_FIELDS) {
+    const el = document.getElementById(id);
+    el.value = ""; el.placeholder = "";
+  }
+  document.getElementById("kv-list").innerHTML = "";
+}
+
+function kvRow(listId, key = "", val = "", masked = "") {
+  const row = document.createElement("div");
+  row.className = "kvrow";
+  row.innerHTML = `
+    <input class="kv-k" placeholder="KEY" value="${esc(key)}">
+    <input class="kv-v" placeholder="${masked ? esc(masked) + "(留空保持不变)" : "value"}"
+           value="${esc(val)}">
+    <button class="danger" title="删除该变量">×</button>`;
+  row.querySelector("button").onclick = () => {
+    if (row.dataset.existing) {
+      // Existing key: mark for deletion (sends "" per merge semantics).
+      row.dataset.deleted = "1";
+      row.style.opacity = 0.4;
+    } else {
+      row.remove();
+    }
+  };
+  document.getElementById(listId).appendChild(row);
+  return row;
+}
+
+function collectKv(listId, out) {
+  for (const row of document.querySelectorAll(`#${listId} .kvrow`)) {
+    const k = row.querySelector(".kv-k").value.trim();
+    const v = row.querySelector(".kv-v").value;
+    if (!k) continue;
+    if (row.dataset.deleted) { out[k] = ""; continue; }
+    if (v === "" && row.dataset.existing) continue; // untouched masked secret
+    out[k] = v;
+  }
+}
+
+async function openEditor(name) {
+  editing = name || null;
+  const ed = document.getElementById("editor");
+  ed.hidden = false;
+  document.getElementById("editor-title").textContent =
+    editing ? `编辑 profile:${editing}` : "新建 profile";
+  document.getElementById("create-only").style.display = editing ? "none" : "block";
+  document.getElementById("editor-msg").textContent = "";
+  clearStdFields();
+  document.getElementById("f-name").value = "";
+  document.getElementById("f-preset").value = "";
+  if (editing) {
+    const { profiles } = await api("/api/profiles");
+    const p = profiles.find(x => x.name === editing);
+    if (!p) return;
+    for (const [id, key] of STD_FIELDS) {
+      if (p.env[key]) document.getElementById(id).placeholder = p.env[key] + "(留空保持不变)";
+    }
+    for (const [k, v] of Object.entries(p.env)) {
+      if (STD_KEYS.has(k)) continue;
+      kvRow("kv-list", k, "", v).dataset.existing = "1";
+    }
+  }
+  ed.scrollIntoView({ behavior: "smooth" });
+}
+
+async function saveEditor() {
+  const msg = document.getElementById("editor-msg");
+  msg.className = ""; msg.textContent = "";
+  const env = {};
+  for (const [id, key] of STD_FIELDS) {
+    const v = document.getElementById(id).value;
+    if (v !== "") env[key] = v;
+  }
+  collectKv("kv-list", env);
+  try {
+    if (editing) {
+      await api(`/api/profiles/${encodeURIComponent(editing)}`,
+        { method: "PUT", body: JSON.stringify({ env }) });
+    } else {
+      const name = document.getElementById("f-name").value.trim();
+      const preset = document.getElementById("f-preset").value || null;
+      await api("/api/profiles",
+        { method: "POST", body: JSON.stringify({ name, preset, env }) });
+    }
+    document.getElementById("editor").hidden = true;
+    await loadAll();
+  } catch (e) {
+    msg.className = "err"; msg.textContent = e.message;
+  }
+}
+
+async function delProfile(name) {
+  if (!confirm(`删除 profile "${name}"?\n\n~/.claude-${name} 目录和历史会话会保留,仅解除托管。`)) return;
+  await api(`/api/profiles/${encodeURIComponent(name)}?confirm=true`, { method: "DELETE" });
+  await loadAll();
+}
+
+async function importDir(name) {
+  await api("/api/profiles/import", { method: "POST", body: JSON.stringify({ name }) });
+  await loadAll();
+}
+
+function renderShared(shared) {
+  const list = document.getElementById("shared-list");
+  list.innerHTML = "";
+  for (const [k, v] of Object.entries(shared)) {
+    kvRow("shared-list", k, "", v).dataset.existing = "1";
+  }
+}
+
+async function saveShared() {
+  const msg = document.getElementById("shared-msg");
+  msg.className = ""; msg.textContent = "";
+  const env = {};
+  collectKv("shared-list", env);
+  try {
+    await api("/api/shared", { method: "PUT", body: JSON.stringify({ env }) });
+    msg.className = "ok"; msg.textContent = "已保存";
+    await loadAll();
+  } catch (e) {
+    msg.className = "err"; msg.textContent = e.message;
+  }
+}
+
+document.getElementById("new-btn").onclick = () => openEditor(null);
+document.getElementById("editor-cancel").onclick = () =>
+  document.getElementById("editor").hidden = true;
+document.getElementById("editor-save").onclick = saveEditor;
+document.getElementById("kv-add").onclick = () => kvRow("kv-list");
+document.getElementById("shared-add").onclick = () => kvRow("shared-list");
+document.getElementById("shared-save").onclick = saveShared;
+
+loadAll().catch(e => {
+  document.getElementById("profile-list").innerHTML =
+    `<p class="err">加载失败:${esc(e.message)}</p>`;
+});
+</script>
+</body>
+</html>
