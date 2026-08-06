@@ -5,56 +5,169 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ccp — Claude Code Profiles</title>
 <style>
-  :root { color-scheme: dark; }
+  :root {
+    color-scheme: dark;
+    --bg: #0b0d12; --side: #0e1118; --card: #151a24; --card-hover: #1a202c;
+    --border: #232a38; --border-soft: #1c2230;
+    --text: #e9ecf3; --muted: #8b93a6; --faint: #5c6373;
+    --accent: #6d7cff; --accent2: #4f8cff;
+    --danger: #e06767; --ok: #5fce8f;
+    --radius: 12px;
+  }
   * { box-sizing: border-box; }
-  body { margin: 0; font: 14px/1.5 -apple-system, "SF Pro", "PingFang SC", sans-serif;
-         background: #0f1115; color: #e6e6e6; }
-  header { padding: 14px 24px; border-bottom: 1px solid #23262e; display: flex; gap: 10px; align-items: baseline; }
-  header h1 { font-size: 18px; margin: 0; }
-  header span { color: #8a8f9a; }
-  main { max-width: 960px; margin: 0 auto; padding: 20px 24px 60px; }
-  h2 { font-size: 15px; margin: 28px 0 10px; color: #aeb4bf; }
-  .card { background: #171a21; border: 1px solid #23262e; border-radius: 10px;
-          padding: 12px 16px; margin-bottom: 10px; }
-  .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-  .name { font-weight: 600; font-size: 15px; }
-  .badge { font-size: 11px; color: #8a8f9a; border: 1px solid #2c303a; border-radius: 99px; padding: 1px 8px; }
-  .home { color: #6f7684; font-family: ui-monospace, monospace; font-size: 12px; }
-  .envchip { font-family: ui-monospace, monospace; font-size: 11px; background: #1e222b;
-             border-radius: 6px; padding: 2px 8px; color: #9aa3b2; }
-  button { background: #2563eb; color: #fff; border: 0; border-radius: 8px;
-           padding: 6px 14px; cursor: pointer; font-size: 13px; }
-  button.ghost { background: transparent; border: 1px solid #2c303a; color: #aeb4bf; }
-  button.danger { background: transparent; border: 1px solid #7f2d2d; color: #e07a7a; }
-  button:hover { filter: brightness(1.15); }
-  input, select { background: #10131a; border: 1px solid #2c303a; color: #e6e6e6;
-                  border-radius: 8px; padding: 7px 10px; font-size: 13px; width: 100%; }
-  label { display: block; font-size: 12px; color: #8a8f9a; margin: 10px 0 4px; }
-  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
-  .kvrow { display: grid; grid-template-columns: 1fr 1.4fr auto; gap: 8px; margin-top: 8px; }
-  .muted { color: #6f7684; font-size: 12px; }
-  .err { color: #e07a7a; font-size: 12px; margin-top: 8px; white-space: pre-wrap; }
-  .ok { color: #6fcf97; font-size: 12px; margin-top: 8px; }
-  #editor { border-color: #2563eb; }
-  .spacer { flex: 1; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; display: flex; background: var(--bg); color: var(--text);
+    font: 14px/1.6 -apple-system, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  button { font: inherit; cursor: pointer; border: 0; border-radius: 9px;
+           padding: 7px 15px; transition: all .15s ease; }
+  button:active { transform: scale(.97); }
+  .btn-primary { background: linear-gradient(135deg, var(--accent), var(--accent2));
+                 color: #fff; font-weight: 550; box-shadow: 0 2px 12px rgba(90,110,255,.25); }
+  .btn-primary:hover { filter: brightness(1.12); box-shadow: 0 4px 16px rgba(90,110,255,.35); }
+  .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--muted); }
+  .btn-ghost:hover { color: var(--text); border-color: #33405a; background: var(--card); }
+  .btn-danger { background: transparent; border: 1px solid rgba(224,103,103,.35); color: var(--danger); }
+  .btn-danger:hover { background: rgba(224,103,103,.1); }
+  .btn-sm { padding: 4px 11px; font-size: 12.5px; border-radius: 7px; }
+  input, select {
+    width: 100%; background: #0d1017; border: 1px solid var(--border); color: var(--text);
+    border-radius: 9px; padding: 8px 12px; font: inherit; font-size: 13.5px;
+    transition: border-color .15s;
+  }
+  input:focus, select:focus { outline: none; border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(109,124,255,.15); }
+  input::placeholder { color: var(--faint); }
+
+  /* ---------- sidebar ---------- */
+  aside {
+    width: 264px; min-width: 264px; height: 100vh; overflow-y: auto;
+    background: var(--side); border-right: 1px solid var(--border-soft);
+    display: flex; flex-direction: column; padding: 18px 14px;
+  }
+  .brand { display: flex; align-items: center; gap: 11px; padding: 2px 6px 16px; }
+  .logo { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center;
+          background: linear-gradient(135deg, var(--accent), var(--accent2));
+          color: #fff; font-weight: 700; font-size: 15px;
+          box-shadow: 0 3px 14px rgba(90,110,255,.4); }
+  .brand b { font-size: 16px; display: block; line-height: 1.2; }
+  .brand small { color: var(--faint); font-size: 11px; }
+  #new-btn { width: 100%; margin: 4px 0 16px; }
+  .nav-label { font-size: 11px; color: var(--faint); text-transform: uppercase;
+               letter-spacing: .08em; padding: 12px 8px 6px; }
+  .nav-item {
+    display: flex; align-items: center; gap: 11px; padding: 9px 10px;
+    border-radius: 10px; cursor: pointer; border: 1px solid transparent;
+    transition: background .12s;
+  }
+  .nav-item:hover { background: var(--card); }
+  .nav-item.active { background: var(--card); border-color: var(--border); }
+  .avatar { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center;
+            font-weight: 600; font-size: 13px; color: #fff; flex-shrink: 0; }
+  .nav-item .meta { min-width: 0; flex: 1; }
+  .nav-item .nm { font-weight: 550; font-size: 13.5px; white-space: nowrap;
+                  overflow: hidden; text-overflow: ellipsis; }
+  .nav-item .sub { font-size: 11px; color: var(--faint); white-space: nowrap;
+                   overflow: hidden; text-overflow: ellipsis; }
+  .side-footer { margin-top: auto; padding-top: 14px; }
+  .side-footer button { width: 100%; }
+
+  /* ---------- main ---------- */
+  main { flex: 1; height: 100vh; overflow-y: auto; padding: 34px 40px 60px; }
+  .empty { height: 100%; display: grid; place-items: center; color: var(--faint); text-align: center; }
+  .empty .big { font-size: 44px; margin-bottom: 12px; opacity: .5; }
+  .detail-head { display: flex; align-items: center; gap: 16px; margin-bottom: 6px; }
+  .detail-head .avatar { width: 46px; height: 46px; border-radius: 13px; font-size: 19px; }
+  .detail-head h1 { font-size: 22px; margin: 0; }
+  .badge { font-size: 11px; color: var(--muted); border: 1px solid var(--border);
+           border-radius: 99px; padding: 2px 10px; }
+  .badge.accent { color: var(--accent); border-color: rgba(109,124,255,.4);
+                  background: rgba(109,124,255,.08); }
+  .home-path { color: var(--faint); font-family: ui-monospace, "SF Mono", monospace;
+               font-size: 12.5px; margin-bottom: 22px; }
+  .actions { display: flex; gap: 9px; margin-bottom: 28px; }
+  h3 { font-size: 13px; color: var(--muted); font-weight: 600; margin: 24px 0 10px;
+       display: flex; align-items: center; gap: 8px; }
+  h3::after { content: ""; flex: 1; height: 1px; background: var(--border-soft); }
+  .envgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 8px; }
+  .envitem { background: var(--card); border: 1px solid var(--border-soft); border-radius: 10px;
+             padding: 8px 13px; display: flex; gap: 10px; align-items: center;
+             font-family: ui-monospace, "SF Mono", monospace; font-size: 12px; }
+  .envitem .k { color: var(--accent2); font-weight: 600; }
+  .envitem .v { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .env-empty { color: var(--faint); font-size: 13px; background: var(--card);
+               border: 1px dashed var(--border); border-radius: 10px; padding: 14px 18px; }
+  .session {
+    display: flex; align-items: center; gap: 14px; padding: 11px 16px;
+    background: var(--card); border: 1px solid var(--border-soft);
+    border-radius: var(--radius); margin-bottom: 8px; transition: all .13s;
+  }
+  .session:hover { background: var(--card-hover); border-color: var(--border); }
+  .session .preview { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden;
+                      text-overflow: ellipsis; font-size: 13.5px; }
+  .session .meta { color: var(--faint); font-size: 11.5px; white-space: nowrap;
+                   font-family: ui-monospace, monospace; }
+  .session .time { color: var(--muted); font-size: 12px; min-width: 64px; text-align: right; }
+
+  /* ---------- modal ---------- */
+  .backdrop { position: fixed; inset: 0; background: rgba(5,7,11,.66);
+              backdrop-filter: blur(3px); display: grid; place-items: center; z-index: 10; }
+  .modal { width: 620px; max-width: 94vw; max-height: 88vh; overflow-y: auto;
+           background: #11151e; border: 1px solid var(--border); border-radius: 16px;
+           padding: 24px 26px; box-shadow: 0 24px 70px rgba(0,0,0,.55); }
+  .modal h2 { margin: 0 0 4px; font-size: 17px; }
+  .modal .hint { color: var(--faint); font-size: 12.5px; margin-bottom: 14px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 5px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+  .kvrow { display: grid; grid-template-columns: 1fr 1.3fr 30px; gap: 8px; margin-top: 8px; }
+  .kvrow button { padding: 0; height: 34px; align-self: end; }
+  .modal-foot { display: flex; justify-content: flex-end; gap: 9px; margin-top: 20px;
+                padding-top: 16px; border-top: 1px solid var(--border-soft); }
+  .form-err { color: var(--danger); font-size: 12.5px; margin-top: 10px; }
+
+  /* ---------- toast ---------- */
+  #toast { position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%) translateY(20px);
+           background: #1c2330; border: 1px solid var(--border); color: var(--text);
+           border-radius: 10px; padding: 10px 18px; font-size: 13px; opacity: 0;
+           transition: all .25s ease; pointer-events: none; z-index: 20;
+           box-shadow: 0 10px 34px rgba(0,0,0,.5); }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  #toast.err { border-color: rgba(224,103,103,.5); color: #f0b0b0; }
+  #toast.ok { border-color: rgba(95,206,143,.4); }
+  ::-webkit-scrollbar { width: 9px; }
+  ::-webkit-scrollbar-thumb { background: #232a38; border-radius: 99px; }
 </style>
 </head>
 <body>
-<header><h1>ccp</h1><span>Claude Code Profiles — 每个源一个隔离家目录</span></header>
-<main>
-  <h2>Profiles</h2>
-  <div id="profile-list"><p class="muted">loading…</p></div>
+<aside>
+  <div class="brand">
+    <div class="logo">⌘</div>
+    <div><b>ccp</b><small>Claude Code Profiles</small></div>
+  </div>
+  <button id="new-btn" class="btn-primary">+ 新建 profile</button>
+  <div class="nav-label">Profiles</div>
+  <nav id="profile-nav"></nav>
   <div id="unmanaged-wrap" hidden>
-    <h2>发现的未托管目录</h2>
+    <div class="nav-label">发现的未托管目录</div>
     <div id="unmanaged-list"></div>
   </div>
-  <button id="new-btn">+ 新建 profile</button>
+  <div class="side-footer">
+    <button id="shared-btn" class="btn-ghost">⚙ 共享环境变量</button>
+  </div>
+</aside>
 
-  <section id="editor" class="card" hidden>
-    <div class="row"><b id="editor-title">新建 profile</b><div class="spacer"></div>
-      <button class="ghost" id="editor-cancel">取消</button></div>
+<main id="detail">
+  <div class="empty"><div><div class="big">⌘</div>选择一个 profile,或新建一个</div></div>
+</main>
+
+<div id="modal-backdrop" class="backdrop" hidden>
+  <div class="modal">
+    <h2 id="editor-title">新建 profile</h2>
+    <div class="hint" id="editor-hint">每个 profile 一个独立家目录 ~/.claude-&lt;name&gt;,会话互不干扰</div>
     <div id="create-only">
-      <label>名称(目录 ~/.claude-&lt;name&gt;,小写字母/数字/连字符)</label>
+      <label>名称(小写字母/数字/连字符)</label>
       <input id="f-name" placeholder="kimi">
       <label>预设(选中自动填充,可改)</label>
       <select id="f-preset"></select>
@@ -71,23 +184,30 @@
     </div>
     <label>高级(任意其他环境变量)</label>
     <div id="kv-list"></div>
-    <button class="ghost" id="kv-add" style="margin-top:8px">+ 添加变量</button>
-    <div class="row" style="margin-top:14px">
-      <button id="editor-save">保存</button>
-      <span id="editor-msg"></span>
-    </div>
-  </section>
-
-  <h2>共享环境变量(叠加到所有 profile,profile 自己的值优先)</h2>
-  <div class="card">
-    <div id="shared-list"></div>
-    <button class="ghost" id="shared-add" style="margin-top:8px">+ 添加变量</button>
-    <div class="row" style="margin-top:12px">
-      <button id="shared-save">保存共享变量</button>
-      <span id="shared-msg"></span>
+    <button class="btn-ghost btn-sm" id="kv-add" style="margin-top:10px">+ 添加变量</button>
+    <div class="form-err" id="editor-msg"></div>
+    <div class="modal-foot">
+      <button class="btn-ghost" id="editor-cancel">取消</button>
+      <button class="btn-primary" id="editor-save">保存</button>
     </div>
   </div>
-</main>
+</div>
+
+<div id="shared-backdrop" class="backdrop" hidden>
+  <div class="modal">
+    <h2>共享环境变量</h2>
+    <div class="hint">启动时叠加到所有 profile;profile 自己的同名变量优先</div>
+    <div id="shared-list"></div>
+    <button class="btn-ghost btn-sm" id="shared-add" style="margin-top:10px">+ 添加变量</button>
+    <div class="form-err" id="shared-msg"></div>
+    <div class="modal-foot">
+      <button class="btn-ghost" id="shared-cancel">取消</button>
+      <button class="btn-primary" id="shared-save">保存</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
 
 <script>
 const STD_FIELDS = [
@@ -102,96 +222,162 @@ const STD_FIELDS = [
 ];
 const STD_KEYS = new Set(STD_FIELDS.map(([, k]) => k));
 let presets = [];
-let editing = null; // profile name when editing, null when creating
+let profilesCache = [];
+let selected = null;   // currently displayed profile name
+let editing = null;    // profile name when editing, null when creating
 
+/* ---------- helpers ---------- */
 async function api(path, opts = {}) {
-  const res = await fetch(path, {
-    headers: { "content-type": "application/json" },
-    ...opts,
-  });
+  const res = await fetch(path, { headers: { "content-type": "application/json" }, ...opts });
   if (!res.ok) {
     let msg = res.statusText;
     try { msg = (await res.json()).error || msg; } catch (_) {}
     throw new Error(msg);
   }
-  if (res.status === 204) return null;
-  return res.json();
+  return res.status === 204 ? null : res.json();
 }
-
 function esc(s) {
   return String(s).replace(/[&<>"']/g, c =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
-
-async function loadAll() {
-  const [presetList, data, shared] = await Promise.all([
-    api("/api/presets"), api("/api/profiles"), api("/api/shared"),
-  ]);
-  presets = presetList;
-  renderPresetSelect();
-  renderProfiles(data.profiles);
-  renderUnmanaged(data.unmanaged);
-  renderShared(shared);
+function hueOf(name) {
+  let h = 0;
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360;
+  return h;
+}
+function avatarHtml(name, cls = "avatar") {
+  const h = hueOf(name);
+  return `<div class="${cls}" style="background:linear-gradient(135deg,hsl(${h},62%,52%),hsl(${(h+40)%360},62%,42%))">${esc(name[0].toUpperCase())}</div>`;
+}
+function relTime(secs) {
+  const d = Date.now() / 1000 - secs;
+  if (d < 3600) return `${Math.max(1, Math.round(d / 60))} 分钟前`;
+  if (d < 86400) return `${Math.round(d / 3600)} 小时前`;
+  if (d < 86400 * 30) return `${Math.round(d / 86400)} 天前`;
+  return new Date(secs * 1000).toLocaleDateString("zh-CN");
+}
+let toastTimer = null;
+function toast(text, kind = "") {
+  const el = document.getElementById("toast");
+  el.textContent = text;
+  el.className = `show ${kind}`;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.className = "", 2600);
 }
 
-function renderProfiles(profiles) {
-  const el = document.getElementById("profile-list");
-  if (!profiles.length) { el.innerHTML = '<p class="muted">还没有 profile</p>'; return; }
-  el.innerHTML = profiles.map(p => `
-    <div class="card">
-      <div class="row">
-        <span class="name">${esc(p.name)}</span>
-        ${p.preset ? `<span class="badge">${esc(p.preset)}</span>` : ""}
-        ${p.managed ? "" : '<span class="badge">未托管</span>'}
-        <span class="home">${esc(p.home)}</span>
-        <div class="spacer"></div>
-        <button onclick="launchProfile('${esc(p.name)}')">▶ 启动</button>
-        <button class="ghost" onclick="toggleSessions('${esc(p.name)}')">会话</button>
-        <button class="ghost" onclick="openEditor('${esc(p.name)}')">编辑</button>
-        ${p.name === "default" ? "" :
-          `<button class="danger" onclick="delProfile('${esc(p.name)}')">删除</button>`}
+/* ---------- load & render ---------- */
+async function loadAll() {
+  const [presetList, data] = await Promise.all([api("/api/presets"), api("/api/profiles")]);
+  presets = presetList;
+  profilesCache = data.profiles;
+  renderPresetSelect();
+  renderNav(data.profiles);
+  renderUnmanaged(data.unmanaged);
+  if (selected && profilesCache.some(p => p.name === selected)) renderDetail(selected);
+  else if (!selected && profilesCache.length) renderDetail(profilesCache[0].name);
+}
+
+function renderNav(profiles) {
+  document.getElementById("profile-nav").innerHTML = profiles.map(p => `
+    <div class="nav-item ${p.name === selected ? "active" : ""}" onclick="renderDetail('${esc(p.name)}')">
+      ${avatarHtml(p.name)}
+      <div class="meta">
+        <div class="nm">${esc(p.name)}</div>
+        <div class="sub">${p.preset ? esc(p.preset) : esc(p.home)}</div>
       </div>
-      <div class="row" style="margin-top:8px">
-        ${Object.entries(p.env).map(([k, v]) =>
-          `<span class="envchip">${esc(k)}=${esc(v)}</span>`).join("") ||
-          '<span class="muted">无环境变量(用 ~/.claude 自身配置 / 官方登录)</span>'}
-      </div>
-      <div id="sessions-${esc(p.name)}" hidden></div>
     </div>`).join("");
 }
 
 function renderUnmanaged(list) {
   const wrap = document.getElementById("unmanaged-wrap");
-  const el = document.getElementById("unmanaged-list");
   wrap.hidden = !list.length;
-  el.innerHTML = list.map(u => `
-    <div class="card row">
-      <span class="name">${esc(u.name)}</span>
-      <span class="home">${esc(u.home)}</span>
-      <div class="spacer"></div>
-      <button class="ghost" onclick="importDir('${esc(u.name)}')">导入为 profile</button>
+  document.getElementById("unmanaged-list").innerHTML = list.map(u => `
+    <div class="nav-item">
+      ${avatarHtml(u.name)}
+      <div class="meta"><div class="nm">${esc(u.name)}</div><div class="sub">未托管</div></div>
+      <button class="btn-ghost btn-sm" onclick="importDir('${esc(u.name)}')">导入</button>
     </div>`).join("");
 }
 
+async function renderDetail(name) {
+  selected = name;
+  renderNav(profilesCache);
+  const p = profilesCache.find(x => x.name === name);
+  if (!p) return;
+  const main = document.getElementById("detail");
+  const envItems = Object.entries(p.env);
+  main.innerHTML = `
+    <div class="detail-head">
+      ${avatarHtml(p.name)}
+      <h1>${esc(p.name)}</h1>
+      ${p.preset ? `<span class="badge accent">${esc(p.preset)}</span>` : ""}
+      ${p.managed ? "" : '<span class="badge">未托管</span>'}
+    </div>
+    <div class="home-path">${esc(p.home)}</div>
+    <div class="actions">
+      <button class="btn-primary" onclick="doLaunch('${esc(p.name)}')">▶ 新会话</button>
+      <button class="btn-ghost" onclick="openEditor('${esc(p.name)}')">编辑配置</button>
+      ${p.name === "default" ? "" :
+        `<button class="btn-danger" onclick="delProfile('${esc(p.name)}')">删除</button>`}
+    </div>
+    <h3>环境变量</h3>
+    ${envItems.length ? `<div class="envgrid">${envItems.map(([k, v]) =>
+        `<div class="envitem"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join("")}</div>`
+      : '<div class="env-empty">无额外变量 — 使用该目录自身的配置(官方登录 / settings.json)</div>'}
+    <h3>历史会话</h3>
+    <div id="session-list"><div class="env-empty">加载中…</div></div>`;
+  try {
+    const list = await api(`/api/profiles/${encodeURIComponent(name)}/sessions`);
+    const el = document.getElementById("session-list");
+    if (!el) return; // user navigated away
+    el.innerHTML = list.length ? list.map(s => `
+      <div class="session">
+        <div class="preview">${esc(s.preview)}</div>
+        ${s.cwd ? `<div class="meta" title="${esc(s.cwd)}">…${esc(s.cwd.slice(-32))}</div>` : ""}
+        <div class="time">${relTime(s.modified)}</div>
+        <button class="btn-ghost btn-sm"
+          onclick="doResume('${esc(name)}','${esc(s.id)}','${esc(s.cwd || "")}')">续聊</button>
+      </div>`).join("")
+      : '<div class="env-empty">还没有历史会话</div>';
+  } catch (e) {
+    const el = document.getElementById("session-list");
+    if (el) el.innerHTML = `<div class="env-empty">加载失败:${esc(e.message)}</div>`;
+  }
+}
+
+/* ---------- launch ---------- */
+async function doLaunch(name) {
+  try {
+    await api(`/api/profiles/${encodeURIComponent(name)}/launch`, { method: "POST", body: "{}" });
+    toast(`已在新终端窗口启动 ${name}`, "ok");
+  } catch (e) { toast(e.message, "err"); }
+}
+async function doResume(name, id, cwd) {
+  try {
+    await api(`/api/profiles/${encodeURIComponent(name)}/launch`,
+      { method: "POST", body: JSON.stringify({ resume: id, cwd: cwd || null }) });
+    toast("已在新终端窗口续聊", "ok");
+  } catch (e) { toast(e.message, "err"); }
+}
+
+/* ---------- editor modal ---------- */
 function renderPresetSelect() {
   const sel = document.getElementById("f-preset");
   const groups = {};
   for (const p of presets) (groups[p.category] ??= []).push(p);
   sel.innerHTML = '<option value="">— 不选预设 —</option>' +
     Object.entries(groups).map(([cat, items]) =>
-      `<optgroup label="${esc(cat)}">` + items.map(p =>
-        `<option value="${esc(p.key)}">${esc(p.label)}</option>`).join("") +
+      `<optgroup label="${esc(cat)}">` +
+      items.map(p => `<option value="${esc(p.key)}">${esc(p.label)}</option>`).join("") +
       "</optgroup>").join("");
   sel.onchange = () => {
     const p = presets.find(x => x.key === sel.value);
     if (!p) return;
     clearStdFields();
-    for (const [id, key] of STD_FIELDS) {
+    for (const [id, key] of STD_FIELDS)
       if (p.env[key]) document.getElementById(id).value = p.env[key];
-    }
   };
 }
-
 function clearStdFields() {
   for (const [id] of STD_FIELDS) {
     const el = document.getElementById(id);
@@ -199,104 +385,53 @@ function clearStdFields() {
   }
   document.getElementById("kv-list").innerHTML = "";
 }
-
 function kvRow(listId, key = "", val = "", masked = "") {
   const row = document.createElement("div");
   row.className = "kvrow";
   row.innerHTML = `
     <input class="kv-k" placeholder="KEY" value="${esc(key)}">
-    <input class="kv-v" placeholder="${masked ? esc(masked) + "(留空保持不变)" : "value"}"
-           value="${esc(val)}">
-    <button class="danger" title="删除该变量">×</button>`;
+    <input class="kv-v" placeholder="${masked ? esc(masked) + "(留空不变)" : "value"}" value="${esc(val)}">
+    <button class="btn-danger" title="删除该变量">×</button>`;
   row.querySelector("button").onclick = () => {
     if (row.dataset.existing) {
-      // Existing key: mark for deletion (sends "" per merge semantics).
       row.dataset.deleted = "1";
-      row.style.opacity = 0.4;
-    } else {
-      row.remove();
-    }
+      row.style.opacity = 0.35;
+    } else row.remove();
   };
   document.getElementById(listId).appendChild(row);
   return row;
 }
-
 function collectKv(listId, out) {
   for (const row of document.querySelectorAll(`#${listId} .kvrow`)) {
     const k = row.querySelector(".kv-k").value.trim();
     const v = row.querySelector(".kv-v").value;
     if (!k) continue;
     if (row.dataset.deleted) { out[k] = ""; continue; }
-    if (v === "" && row.dataset.existing) continue; // untouched masked secret
+    if (v === "" && row.dataset.existing) continue;
     out[k] = v;
   }
 }
-
-async function launchProfile(name) {
-  await api(`/api/profiles/${encodeURIComponent(name)}/launch`,
-    { method: "POST", body: "{}" });
-}
-
-async function resumeSession(name, id, cwd) {
-  await api(`/api/profiles/${encodeURIComponent(name)}/launch`,
-    { method: "POST", body: JSON.stringify({ resume: id, cwd: cwd || null }) });
-}
-
-function relTime(secs) {
-  const d = Date.now() / 1000 - secs;
-  if (d < 3600) return `${Math.max(1, Math.round(d / 60))} 分钟前`;
-  if (d < 86400) return `${Math.round(d / 3600)} 小时前`;
-  return `${Math.round(d / 86400)} 天前`;
-}
-
-async function toggleSessions(name) {
-  const el = document.getElementById(`sessions-${name}`);
-  if (!el.hidden) { el.hidden = true; return; }
-  el.hidden = false;
-  el.innerHTML = '<p class="muted">扫描会话中…</p>';
-  const list = await api(`/api/profiles/${encodeURIComponent(name)}/sessions`);
-  if (!list.length) {
-    el.innerHTML = '<p class="muted">该 profile 还没有历史会话</p>';
-    return;
-  }
-  el.innerHTML = list.map(s => `
-    <div class="row" style="padding:5px 0;border-top:1px solid #23262e">
-      <button class="ghost" title="在新终端窗口续聊"
-        onclick="resumeSession('${esc(name)}','${esc(s.id)}','${esc(s.cwd || "")}')">续聊</button>
-      <span style="flex:1">${esc(s.preview)}</span>
-      <span class="muted">${relTime(s.modified)}</span>
-    </div>`).join("");
-}
-
 async function openEditor(name) {
   editing = name || null;
-  const ed = document.getElementById("editor");
-  ed.hidden = false;
-  document.getElementById("editor-title").textContent =
-    editing ? `编辑 profile:${editing}` : "新建 profile";
+  document.getElementById("editor-title").textContent = editing ? `编辑:${editing}` : "新建 profile";
   document.getElementById("create-only").style.display = editing ? "none" : "block";
   document.getElementById("editor-msg").textContent = "";
   clearStdFields();
   document.getElementById("f-name").value = "";
   document.getElementById("f-preset").value = "";
   if (editing) {
-    const { profiles } = await api("/api/profiles");
-    const p = profiles.find(x => x.name === editing);
+    const p = profilesCache.find(x => x.name === editing);
     if (!p) return;
-    for (const [id, key] of STD_FIELDS) {
-      if (p.env[key]) document.getElementById(id).placeholder = p.env[key] + "(留空保持不变)";
-    }
-    for (const [k, v] of Object.entries(p.env)) {
-      if (STD_KEYS.has(k)) continue;
-      kvRow("kv-list", k, "", v).dataset.existing = "1";
-    }
+    for (const [id, key] of STD_FIELDS)
+      if (p.env[key]) document.getElementById(id).placeholder = p.env[key] + "(留空不变)";
+    for (const [k, v] of Object.entries(p.env))
+      if (!STD_KEYS.has(k)) kvRow("kv-list", k, "", v).dataset.existing = "1";
   }
-  ed.scrollIntoView({ behavior: "smooth" });
+  document.getElementById("modal-backdrop").hidden = false;
 }
-
 async function saveEditor() {
   const msg = document.getElementById("editor-msg");
-  msg.className = ""; msg.textContent = "";
+  msg.textContent = "";
   const env = {};
   for (const [id, key] of STD_FIELDS) {
     const v = document.getElementById(id).value;
@@ -310,61 +445,72 @@ async function saveEditor() {
     } else {
       const name = document.getElementById("f-name").value.trim();
       const preset = document.getElementById("f-preset").value || null;
-      await api("/api/profiles",
-        { method: "POST", body: JSON.stringify({ name, preset, env }) });
+      await api("/api/profiles", { method: "POST", body: JSON.stringify({ name, preset, env }) });
+      selected = name;
     }
-    document.getElementById("editor").hidden = true;
+    document.getElementById("modal-backdrop").hidden = true;
+    toast("已保存", "ok");
     await loadAll();
-  } catch (e) {
-    msg.className = "err"; msg.textContent = e.message;
-  }
+  } catch (e) { msg.textContent = e.message; }
 }
 
-async function delProfile(name) {
-  if (!confirm(`删除 profile "${name}"?\n\n~/.claude-${name} 目录和历史会话会保留,仅解除托管。`)) return;
-  await api(`/api/profiles/${encodeURIComponent(name)}?confirm=true`, { method: "DELETE" });
-  await loadAll();
-}
-
-async function importDir(name) {
-  await api("/api/profiles/import", { method: "POST", body: JSON.stringify({ name }) });
-  await loadAll();
-}
-
-function renderShared(shared) {
+/* ---------- shared modal ---------- */
+async function openShared() {
+  const shared = await api("/api/shared");
   const list = document.getElementById("shared-list");
   list.innerHTML = "";
-  for (const [k, v] of Object.entries(shared)) {
+  for (const [k, v] of Object.entries(shared))
     kvRow("shared-list", k, "", v).dataset.existing = "1";
-  }
+  document.getElementById("shared-msg").textContent = "";
+  document.getElementById("shared-backdrop").hidden = false;
 }
-
 async function saveShared() {
   const msg = document.getElementById("shared-msg");
-  msg.className = ""; msg.textContent = "";
   const env = {};
   collectKv("shared-list", env);
   try {
     await api("/api/shared", { method: "PUT", body: JSON.stringify({ env }) });
-    msg.className = "ok"; msg.textContent = "已保存";
+    document.getElementById("shared-backdrop").hidden = true;
+    toast("共享变量已保存", "ok");
+  } catch (e) { msg.textContent = e.message; }
+}
+
+/* ---------- misc actions ---------- */
+async function delProfile(name) {
+  if (!confirm(`删除 profile "${name}"?\n\n~/.claude-${name} 目录和历史会话保留,仅解除托管。`)) return;
+  try {
+    await api(`/api/profiles/${encodeURIComponent(name)}?confirm=true`, { method: "DELETE" });
+    if (selected === name) selected = "default";
+    toast("已删除", "ok");
     await loadAll();
-  } catch (e) {
-    msg.className = "err"; msg.textContent = e.message;
-  }
+  } catch (e) { toast(e.message, "err"); }
+}
+async function importDir(name) {
+  try {
+    await api("/api/profiles/import", { method: "POST", body: JSON.stringify({ name }) });
+    toast(`已导入 ${name}`, "ok");
+    selected = name;
+    await loadAll();
+  } catch (e) { toast(e.message, "err"); }
 }
 
 document.getElementById("new-btn").onclick = () => openEditor(null);
 document.getElementById("editor-cancel").onclick = () =>
-  document.getElementById("editor").hidden = true;
+  document.getElementById("modal-backdrop").hidden = true;
 document.getElementById("editor-save").onclick = saveEditor;
 document.getElementById("kv-add").onclick = () => kvRow("kv-list");
+document.getElementById("shared-btn").onclick = openShared;
 document.getElementById("shared-add").onclick = () => kvRow("shared-list");
 document.getElementById("shared-save").onclick = saveShared;
+document.getElementById("shared-cancel").onclick = () =>
+  document.getElementById("shared-backdrop").hidden = true;
+for (const id of ["modal-backdrop", "shared-backdrop"]) {
+  document.getElementById(id).addEventListener("click", e => {
+    if (e.target.id === id) e.target.hidden = true;
+  });
+}
 
-loadAll().catch(e => {
-  document.getElementById("profile-list").innerHTML =
-    `<p class="err">加载失败:${esc(e.message)}</p>`;
-});
+loadAll().catch(e => toast(`加载失败:${e.message}`, "err"));
 </script>
 </body>
 </html>
