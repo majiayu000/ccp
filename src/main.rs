@@ -1,7 +1,7 @@
 //! ccp CLI entry point.
 
 use ccp::paths::Paths;
-use ccp::{presets, web};
+use ccp::{doctor, presets, web};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -24,6 +24,8 @@ enum Cmd {
     },
     /// Print the built-in provider preset table.
     Presets,
+    /// Sanity-check profiles, file permissions, and template symlinks.
+    Doctor,
 }
 
 const DEFAULT_PORT: u16 = 9847;
@@ -39,6 +41,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("{:<16} {:<14} {}", p.key, p.category, p.label);
             }
             Ok(())
+        }
+        Cmd::Doctor => {
+            let checks = doctor::run(&paths);
+            let code = doctor::print_report(&checks);
+            std::process::exit(code);
         }
         Cmd::Serve { port } => {
             let port = resolve_port(&paths, port);

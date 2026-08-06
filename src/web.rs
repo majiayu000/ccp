@@ -1,5 +1,6 @@
 //! axum server: routes, handlers, error mapping.
 
+use crate::connect;
 use crate::launch;
 use crate::page::INDEX_HTML;
 use crate::paths::Paths;
@@ -54,6 +55,9 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/profiles/{name}/sessions", get(list_sessions))
         .route("/api/profiles/{name}/launch", post(launch_profile))
+        .route("/api/profiles/{name}/test", post(test_profile))
+        .route("/api/export", get(export_profiles))
+        .route("/api/import", post(import_profiles))
         .route("/api/shared", get(get_shared).put(put_shared))
         .with_state(state)
 }
@@ -130,6 +134,45 @@ pub struct LaunchRequest {
     resume: Option<String>,
     #[serde(default)]
     cwd: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct ExportQuery {
+    #[serde(default)]
+    include_secrets: bool,
+}
+
+#[derive(Deserialize)]
+pub struct ImportRequest {
+    profiles: Vec<ImportProfile>,
+    #[serde(default)]
+    shared: Option<BTreeMap<String, String>>,
+    /// "skip" (default) or "overwrite" for existing profiles.
+    #[serde(default)]
+    policy: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct ImportProfile {
+    name: String,
+    #[serde(default)]
+    preset: Option<String>,
+    #[serde(default)]
+    env: BTreeMap<String, String>,
+}
+
+#[derive(Default, Serialize)]
+pub struct ImportSummary {
+    created: Vec<String>,
+    updated: Vec<String>,
+    skipped: Vec<String>,
+    errors: Vec<ImportError>,
+}
+
+#[derive(Serialize)]
+pub struct ImportError {
+    name: String,
+    error: String,
 }
 
 // ---------- handlers ----------
@@ -226,6 +269,96 @@ async fn launch_profile(
         message: format!("failed to open Terminal: {e}"),
     })?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn test_profile(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<Json<connect::Connectivity>, ApiError> {
+    let profile = state.store.get(&name)?;
+    let mut env = state.store.read_shared()?;
+    env.extend(profile.env);
+    let base = env.get("ANTHROPIC_BASE_URL").map(String::as_str);
+    let token = env
+        .get("ANTHROPIC_AUTH_TOKEN")
+        .or_else(|| env.get("ANTHROPIC_API_KEY"))
+        .map(String::as_str);
+    let result = connect::check(base, token).await.map_err(|e| ApiError {
+        status: StatusCode::BAD_GATEWAY,
+        message: e,
+    })?;
+    Ok(Json(result))
+}
+
+async fn export_profiles(
+    State(state): State<AppState>,
+    Query(q): Query<ExportQuery>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let (profiles, _) = state.store.list()?;
+    let mask_map = |env: BTreeMap<String, String>| -> BTreeMap<String, String> {
+        if q.include_secrets {
+            env
+        } else {
+            env.into_iter().map(|(k, v)| (k, mask(&v))).collect()
+        }
+    };
+    let shared = state.store.read_shared()?;
+    Ok(Json(serde_json::json!({
+        "version": 1,
+        "profiles": profiles
+            .into_iter()
+            .map(|p| serde_json::json!({
+                "name": p.name,
+                "preset": p.preset,
+                "env": mask_map(p.env),
+            }))
+            .collect::<Vec<_>>(),
+        "shared": mask_map(shared),
+        "warning": if q.include_secrets {
+            "this file contains plaintext tokens — store it accordingly"
+        } else {
+            "tokens are masked; re-enter them after import"
+        },
+    })))
+}
+
+async fn import_profiles(
+    State(state): State<AppState>,
+    Json(body): Json<ImportRequest>,
+) -> Result<Json<ImportSummary>, ApiError> {
+    let mut summary = ImportSummary::default();
+    let overwrite = body.policy.as_deref() == Some("overwrite");
+    if body.policy.is_some() && !overwrite {
+        return Err(ApiError::bad_request(
+            "policy must be \"skip\" or \"overwrite\"".into(),
+        ));
+    }
+    for p in body.profiles {
+        let name = p.name.as_str();
+        let exists = state.store.get(name).map(|pr| pr.managed).unwrap_or(false)
+            || name == crate::paths::DEFAULT_PROFILE;
+        let result = if exists && !overwrite {
+            summary.skipped.push(name.into());
+            continue;
+        } else if exists || state.store.import(name).is_ok() {
+            // Existing profile, or an unmanaged dir we can adopt on the fly.
+            state.store.update_env(name, p.env)
+        } else {
+            state.store.create(name, p.preset.clone(), p.env)
+        };
+        match result {
+            Ok(_) if exists => summary.updated.push(name.into()),
+            Ok(_) => summary.created.push(name.into()),
+            Err(e) => summary.errors.push(ImportError {
+                name: name.into(),
+                error: e.to_string(),
+            }),
+        }
+    }
+    if let Some(shared) = body.shared {
+        state.store.write_shared(shared)?;
+    }
+    Ok(Json(summary))
 }
 
 async fn get_shared(

@@ -334,6 +334,146 @@ async fn sessions_list_and_launch_with_injected_launcher() {
 }
 
 #[tokio::test]
+async fn test_endpoint_probes_profile_base_url() {
+    async fn models(headers: axum::http::HeaderMap) -> (StatusCode, &'static str) {
+        if headers.get("x-api-key").is_some() {
+            (StatusCode::OK, "[]")
+        } else {
+            (StatusCode::UNAUTHORIZED, "nope")
+        }
+    }
+    let stub = Router::new().route("/v1/models", axum::routing::get(models));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, stub).await.unwrap() });
+
+    let f = fixture();
+    call(
+        f.app.clone(),
+        json_req(
+            "POST",
+            "/api/profiles",
+            json!({"name": "kimi", "env": {
+                "ANTHROPIC_BASE_URL": format!("http://{addr}"),
+                "ANTHROPIC_AUTH_TOKEN": "sk-x",
+            }}),
+        ),
+    )
+    .await;
+    let (status, body) = call(
+        f.app.clone(),
+        json_req("POST", "/api/profiles/kimi/test", json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["auth"], "ok");
+    assert_eq!(body["http_status"], 200);
+    assert!(body["latency_ms"].is_number());
+
+    // Unreachable upstream → 502 with a readable message.
+    call(
+        f.app.clone(),
+        json_req(
+            "PUT",
+            "/api/profiles/kimi",
+            json!({"env": {"ANTHROPIC_BASE_URL": "http://127.0.0.1:1"}}),
+        ),
+    )
+    .await;
+    let (status, body) = call(
+        f.app.clone(),
+        json_req("POST", "/api/profiles/kimi/test", json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
+    assert!(body["error"]
+        .as_str()
+        .unwrap()
+        .contains("connection failed"));
+}
+
+#[tokio::test]
+async fn export_masks_and_import_respects_policy() {
+    let f = fixture();
+    call(
+        f.app.clone(),
+        json_req(
+            "POST",
+            "/api/profiles",
+            json!({"name": "kimi", "preset": "moonshot",
+                   "env": {"ANTHROPIC_AUTH_TOKEN": "sk-secret-1234567890"}}),
+        ),
+    )
+    .await;
+
+    // Default export masks tokens.
+    let (status, body) = call(f.app.clone(), get0("/api/export")).await;
+    assert_eq!(status, StatusCode::OK);
+    let kimi = body["profiles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "kimi")
+        .unwrap()
+        .clone();
+    assert!(kimi["env"]["ANTHROPIC_AUTH_TOKEN"]
+        .as_str()
+        .unwrap()
+        .contains('…'));
+
+    // include_secrets round-trips the real value.
+    let (_, body) = call(f.app.clone(), get0("/api/export?include_secrets=true")).await;
+    assert_eq!(
+        body["profiles"][1]["env"]["ANTHROPIC_AUTH_TOKEN"],
+        "sk-secret-1234567890"
+    );
+
+    // Import skip policy leaves existing untouched.
+    let (status, body) = call(
+        f.app.clone(),
+        json_req(
+            "POST",
+            "/api/import",
+            json!({"profiles": [{"name": "kimi", "env": {"A": "1"}},
+                                {"name": "zhipu", "env": {"B": "2"}}]}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["skipped"], json!(["kimi"]));
+    assert_eq!(body["created"], json!(["zhipu"]));
+    let raw = std::fs::read_to_string(f.ccp_home.join("profiles/kimi.toml")).unwrap();
+    assert!(!raw.contains("A = "));
+
+    // Overwrite merges into existing.
+    let (_, body) = call(
+        f.app.clone(),
+        json_req(
+            "POST",
+            "/api/import",
+            json!({"policy": "overwrite",
+                   "profiles": [{"name": "kimi", "env": {"A": "1"}}]}),
+        ),
+    )
+    .await;
+    assert_eq!(body["updated"], json!(["kimi"]));
+    let raw = std::fs::read_to_string(f.ccp_home.join("profiles/kimi.toml")).unwrap();
+    assert!(raw.contains("A = \"1\""));
+
+    // Bad policy is a 400, not a silent skip.
+    let (status, _) = call(
+        f.app.clone(),
+        json_req(
+            "POST",
+            "/api/import",
+            json!({"policy": "merge", "profiles": []}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn shared_overlay_roundtrip_masked() {
     let f = fixture();
     let (status, _) = call(
