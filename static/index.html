@@ -154,7 +154,7 @@
     <div id="unmanaged-list"></div>
   </div>
   <div class="side-footer">
-    <button id="shared-btn" class="btn-ghost">⚙ 共享环境变量</button>
+    <button id="shared-btn" class="btn-ghost btn-sm" style="color:var(--faint)">共享变量(高级)</button>
   </div>
 </aside>
 
@@ -195,8 +195,12 @@
 
 <div id="shared-backdrop" class="backdrop" hidden>
   <div class="modal">
-    <h2>共享环境变量</h2>
-    <div class="hint">启动时叠加到所有 profile;profile 自己的同名变量优先</div>
+    <h2>共享环境变量 <span class="badge">高级功能,可留空</span></h2>
+    <div class="hint">
+      在这里配置的变量,启动<b>任何</b> profile 时都会自动带上,不用每个 profile 各配一遍。<br>
+      例:<code style="font-family:ui-monospace,monospace">CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = 1</code>(所有源统一关闭遥测流量)。<br>
+      如果某个 profile 自己配了同名变量,以 profile 自己的值为准。<b>没有这类需求就空着,不影响任何使用。</b>
+    </div>
     <div id="shared-list"></div>
     <button class="btn-ghost btn-sm" id="shared-add" style="margin-top:10px">+ 添加变量</button>
     <div class="form-err" id="shared-msg"></div>
@@ -468,6 +472,11 @@ async function saveShared() {
   const msg = document.getElementById("shared-msg");
   const env = {};
   collectKv("shared-list", env);
+  if (Object.keys(env).length === 0) {
+    document.getElementById("shared-backdrop").hidden = true;
+    toast("没有需要保存的改动");
+    return;
+  }
   try {
     await api("/api/shared", { method: "PUT", body: JSON.stringify({ env }) });
     document.getElementById("shared-backdrop").hidden = true;
