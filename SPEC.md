@@ -32,7 +32,6 @@ Explicitly rejected: local proxy/failover, tray hot-switching (ccp has no
 ## Non-goals (MVP)
 
 - No desktop app (Tauri), no menubar.
-- No keychain integration (phase 2).
 - No npm/frontend build step.
 - Linux support is best-effort; macOS is the target.
 
@@ -173,7 +172,8 @@ Server merges `shared.toml` env under the profile env, then runs:
 osascript -e 'tell application "Terminal" to do script "env CLAUDE_CONFIG_DIR=$HOME/.claude-kimi ANTHROPIC_BASE_URL=... ... claude --resume <id>"'
 ```
 
-Env values are single-quote escaped. iTerm support: phase 2.
+Env values are single-quote escaped. iTerm supported via
+`terminal = "iterm"` in config.toml (implemented in M4).
 
 ## Template inheritance
 
@@ -181,17 +181,18 @@ On profile creation (NOT for default or imports), symlink from `~/.claude/`
 into the new profile home: `CLAUDE.md`, `agents/`, `skills/` (skip if
 missing). Configurable later.
 
-Phase 2: optional copy of MCP server config from default profile on creation
-(each profile has isolated config, so MCP servers must be provisioned per
-profile; copying saves re-setup).
+MCP copy-on-create (implemented in M4): `mcpServers` from the default
+profile's `~/.claude.json` is copied into the new home on creation (each
+profile has isolated config, so MCP servers must be provisioned per profile;
+copying saves re-setup).
 
 ## Milestones
 
-- **M1**: axum skeleton, presets (embedded presets.toml), profile CRUD + discovery/import API, shared overlay, embedded page with preset dropdown + tier-model fields + advanced KV editor
-- **M2**: `/launch` via osascript, sessions list + resume button in UI
-- **M3**: `/test` connectivity check, export/import JSON, `ccp doctor` subcommand (CLI support check for CLAUDE_CONFIG_DIR, env file perms, broken symlinks)
-- **M4** (phase 2): keychain storage via `keyring` crate, usage stats parsed from session jsonl (per-profile tokens/cost, trend chart), MCP copy-on-create, iTerm adapter
-- **M5** (phase 3, exploratory): same profile abstraction for Codex (`~/.codex-<name>` via `CODEX_HOME`) and Gemini (`~/.gemini-<name>`)
+- **M1** ✅: axum skeleton, presets (embedded presets.toml), profile CRUD + discovery/import API, shared overlay, embedded page with preset dropdown + tier-model fields + advanced KV editor
+- **M2** ✅: `/launch` via osascript, sessions list + resume button in UI
+- **M3** ✅: `/test` connectivity check, export/import JSON, `ccp doctor` subcommand (CLI support check for CLAUDE_CONFIG_DIR, env file perms, broken symlinks)
+- **M4** ✅: keychain storage via `keyring` crate, usage stats parsed from session jsonl (per-profile tokens, trend chart), MCP copy-on-create, iTerm adapter
+- **M5** (phase 3, exploratory, not started): same profile abstraction for Codex (`~/.codex-<name>` via `CODEX_HOME`) and Gemini (`~/.gemini-<name>`)
 
 ## Done-when (M1+M2 acceptance)
 
