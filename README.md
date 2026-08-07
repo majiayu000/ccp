@@ -1,5 +1,8 @@
 # ccp — Claude Code Profiles
 
+[![CI](https://github.com/majiayu000/ccp/actions/workflows/ci.yml/badge.svg)](https://github.com/majiayu000/ccp/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Run multiple Claude Code API providers side by side, each in its own isolated
 config home. Switching tools like cc-switch mutate the global
 `~/.claude/settings.json`, so every new or resumed session follows whichever
