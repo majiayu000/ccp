@@ -45,6 +45,26 @@ pub fn find(key: &str) -> Option<&'static Preset> {
     load().iter().find(|p| p.key == key)
 }
 
+/// Hostnames from built-in preset `ANTHROPIC_BASE_URL` values.
+/// Used by the connectivity probe to decide where credentials may be sent.
+pub fn probe_credential_hosts() -> Vec<String> {
+    let mut hosts = Vec::new();
+    for preset in load() {
+        let Some(base) = preset.env.get("ANTHROPIC_BASE_URL") else {
+            continue;
+        };
+        let Ok(url) = reqwest::Url::parse(base) else {
+            continue;
+        };
+        if let Some(host) = url.host_str() {
+            hosts.push(host.to_ascii_lowercase());
+        }
+    }
+    hosts.sort();
+    hosts.dedup();
+    hosts
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -71,5 +91,13 @@ mod tests {
             p.env.get("ANTHROPIC_BASE_URL").map(String::as_str),
             Some("https://api.moonshot.cn/anthropic")
         );
+    }
+
+    #[test]
+    fn probe_credential_hosts_include_preset_endpoints() {
+        let hosts = probe_credential_hosts();
+        assert!(hosts.iter().any(|h| h == "api.moonshot.cn"));
+        assert!(hosts.iter().any(|h| h == "api.deepseek.com"));
+        assert!(!hosts.iter().any(|h| h.contains('/')));
     }
 }

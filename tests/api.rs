@@ -407,6 +407,59 @@ async fn test_endpoint_probes_profile_base_url() {
 }
 
 #[tokio::test]
+async fn test_endpoint_rejects_ssrf_and_untrusted_credential_hosts() {
+    let f = fixture();
+
+    // Attacker-controlled HTTPS host must not receive Keychain tokens.
+    call(
+        f.app.clone(),
+        json_req(
+            "POST",
+            "/api/profiles",
+            json!({"name": "evil", "env": {
+                "ANTHROPIC_BASE_URL": "https://evil.example.com",
+                "ANTHROPIC_AUTH_TOKEN": "sk-exfiltrate",
+            }}),
+        ),
+    )
+    .await;
+    let (status, body) = call(
+        f.app.clone(),
+        json_req("POST", "/api/profiles/evil/test", json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY, "{body}");
+    let err = body["error"].as_str().unwrap();
+    assert!(err.contains("untrusted host"), "{err}");
+    assert!(err.contains("evil.example.com"), "{err}");
+
+    // Link-local metadata SSRF target is rejected before any request.
+    call(
+        f.app.clone(),
+        json_req(
+            "POST",
+            "/api/profiles",
+            json!({"name": "meta", "env": {
+                "ANTHROPIC_BASE_URL": "http://169.254.169.254",
+                "ANTHROPIC_AUTH_TOKEN": "sk-x",
+            }}),
+        ),
+    )
+    .await;
+    let (status, body) = call(
+        f.app.clone(),
+        json_req("POST", "/api/profiles/meta/test", json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY, "{body}");
+    let err = body["error"].as_str().unwrap();
+    assert!(
+        err.contains("refusing") || err.contains("non-HTTPS"),
+        "{err}"
+    );
+}
+
+#[tokio::test]
 async fn export_masks_and_import_respects_policy() {
     let f = fixture();
     call(
