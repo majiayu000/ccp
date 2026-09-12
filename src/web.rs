@@ -9,16 +9,21 @@ use crate::profile::{mask, Profile, ProfileStore, StoreError, Unmanaged};
 use crate::secret;
 use crate::sessions;
 use crate::usage;
-use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
-use axum::response::{Html, IntoResponse, Json};
+use axum::extract::{Path, Query, Request, State};
+use axum::http::{header, HeaderMap, StatusCode};
+use axum::middleware::{self, Next};
+use axum::response::{Html, IntoResponse, Json, Response};
 use axum::routing::{get, post, put};
 use axum::Router;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::io::{Read, Write};
 
 /// How many sessions to return per profile.
 const SESSION_LIST_LIMIT: usize = 50;
+
+/// Confirmation header value required for plaintext secret export.
+const EXPORT_SECRETS_CONFIRM: &str = "export-secrets";
 
 /// Launch hook: production spawns Terminal via osascript; tests capture.
 type Launcher = std::sync::Arc<dyn Fn(&str) -> std::io::Result<()> + Send + Sync>;
@@ -27,35 +32,92 @@ type Launcher = std::sync::Arc<dyn Fn(&str) -> std::io::Result<()> + Send + Sync
 pub struct AppState {
     store: std::sync::Arc<ProfileStore>,
     launcher: Launcher,
+    /// Bearer token required on every `/api/*` request.
+    api_token: String,
+    /// Listen port — used to allowlist `Origin` / `Host` for loopback only.
+    port: u16,
 }
 
 impl AppState {
-    pub fn new(paths: Paths) -> Self {
-        Self::with_launcher(paths, launch::spawn_terminal)
+    pub fn new(paths: Paths, port: u16) -> std::io::Result<Self> {
+        Self::with_launcher(paths, port, launch::spawn_terminal)
     }
 
     pub fn with_launcher(
         paths: Paths,
+        port: u16,
         launcher: impl Fn(&str) -> std::io::Result<()> + Send + Sync + 'static,
-    ) -> Self {
-        Self::with_parts(paths, std::sync::Arc::new(secret::KeychainStore), launcher)
+    ) -> std::io::Result<Self> {
+        let token = load_or_create_api_token(&paths)?;
+        Ok(Self::with_parts(
+            paths,
+            std::sync::Arc::new(secret::KeychainStore),
+            launcher,
+            token,
+            port,
+        ))
     }
 
     pub fn with_parts(
         paths: Paths,
         secrets: std::sync::Arc<dyn secret::SecretStore>,
         launcher: impl Fn(&str) -> std::io::Result<()> + Send + Sync + 'static,
+        api_token: impl Into<String>,
+        port: u16,
     ) -> Self {
         Self {
             store: std::sync::Arc::new(ProfileStore::with_secrets(paths, secrets)),
             launcher: std::sync::Arc::new(launcher),
+            api_token: api_token.into(),
+            port,
         }
     }
 }
 
+/// Load `~/.ccp/api_token` or create a fresh random one (mode 0600).
+pub fn load_or_create_api_token(paths: &Paths) -> std::io::Result<String> {
+    let path = paths.api_token_file();
+    if let Ok(existing) = std::fs::read_to_string(&path) {
+        let trimmed = existing.trim().to_string();
+        if !trimmed.is_empty() {
+            return Ok(trimmed);
+        }
+    }
+    let token = generate_api_token()?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut file = std::fs::File::create(&path)?;
+    file.write_all(token.as_bytes())?;
+    file.write_all(b"\n")?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(token)
+}
+
+fn generate_api_token() -> std::io::Result<String> {
+    let mut bytes = [0u8; 32];
+    #[cfg(unix)]
+    {
+        std::fs::File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+    }
+    #[cfg(not(unix))]
+    {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut h = DefaultHasher::new();
+        std::time::SystemTime::now().hash(&mut h);
+        std::process::id().hash(&mut h);
+        bytes[..8].copy_from_slice(&h.finish().to_le_bytes());
+    }
+    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
+}
+
 pub fn router(state: AppState) -> Router {
-    Router::new()
-        .route("/", get(index))
+    let api = Router::new()
         .route("/api/presets", get(list_presets))
         .route("/api/profiles", get(list_profiles).post(create_profile))
         .route("/api/profiles/import", post(import_profile))
@@ -67,23 +129,105 @@ pub fn router(state: AppState) -> Router {
         .route("/api/profiles/{name}/launch", post(launch_profile))
         .route("/api/profiles/{name}/test", post(test_profile))
         .route("/api/profiles/{name}/usage", get(profile_usage))
-        .route("/api/export", get(export_profiles))
+        .route(
+            "/api/export",
+            get(export_profiles_get).post(export_profiles_post),
+        )
         .route("/api/import", post(import_profiles))
         .route("/api/shared", get(get_shared).put(put_shared))
+        .layer(middleware::from_fn_with_state(state.clone(), protect_api))
+        .with_state(state.clone());
+
+    Router::new()
+        .route("/", get(index))
+        .merge(api)
         .with_state(state)
 }
 
 pub async fn serve(paths: Paths, port: u16, iterm: bool) -> Result<(), Box<dyn std::error::Error>> {
     let state = if iterm {
-        AppState::with_launcher(paths, launch::spawn_iterm)
+        AppState::with_launcher(paths, port, launch::spawn_iterm)?
     } else {
-        AppState::new(paths)
+        AppState::new(paths, port)?
     };
     let app = router(state);
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
     eprintln!("ccp GUI: http://127.0.0.1:{port}");
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+/// Require loopback `Host`/`Origin` and a bearer token on `/api/*`.
+/// Intentionally does **not** emit `Access-Control-Allow-Private-Network`.
+async fn protect_api(
+    State(state): State<AppState>,
+    req: Request,
+    next: Next,
+) -> Result<Response, ApiError> {
+    if let Some(host) = req
+        .headers()
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok())
+    {
+        if !host_allowed(host, state.port) {
+            return Err(ApiError {
+                status: StatusCode::FORBIDDEN,
+                message: "refusing non-loopback Host".into(),
+            });
+        }
+    }
+    if let Some(origin) = req
+        .headers()
+        .get(header::ORIGIN)
+        .and_then(|v| v.to_str().ok())
+    {
+        if !origin_allowed(origin, state.port) {
+            return Err(ApiError {
+                status: StatusCode::FORBIDDEN,
+                message: "cross-origin request rejected".into(),
+            });
+        }
+    }
+    if !request_has_valid_token(&req, &state.api_token) {
+        return Err(ApiError {
+            status: StatusCode::UNAUTHORIZED,
+            message: "missing or invalid API token".into(),
+        });
+    }
+    Ok(next.run(req).await)
+}
+
+fn host_allowed(host: &str, port: u16) -> bool {
+    let host = host.trim();
+    host.eq_ignore_ascii_case(&format!("127.0.0.1:{port}"))
+        || host.eq_ignore_ascii_case(&format!("localhost:{port}"))
+        || host.eq_ignore_ascii_case("127.0.0.1")
+        || host.eq_ignore_ascii_case("localhost")
+        || host.eq_ignore_ascii_case(&format!("[::1]:{port}"))
+        || host.eq_ignore_ascii_case("[::1]")
+}
+
+fn origin_allowed(origin: &str, port: u16) -> bool {
+    let origin = origin.trim();
+    origin.eq_ignore_ascii_case(&format!("http://127.0.0.1:{port}"))
+        || origin.eq_ignore_ascii_case(&format!("http://localhost:{port}"))
+        || origin.eq_ignore_ascii_case(&format!("http://[::1]:{port}"))
+}
+
+fn request_has_valid_token(req: &Request, expected: &str) -> bool {
+    if let Some(auth) = req
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+    {
+        if let Some(token) = auth.strip_prefix("Bearer ") {
+            return token == expected;
+        }
+    }
+    req.headers()
+        .get("x-ccp-token")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|t| t == expected)
 }
 
 // ---------- DTOs (secrets always masked on the way out) ----------
@@ -170,6 +314,12 @@ pub struct ExportQuery {
 }
 
 #[derive(Deserialize)]
+pub struct ExportBody {
+    #[serde(default)]
+    include_secrets: bool,
+}
+
+#[derive(Deserialize)]
 pub struct UsageQuery {
     #[serde(default = "default_usage_days")]
     days: u64,
@@ -214,8 +364,15 @@ pub struct ImportError {
 
 // ---------- handlers ----------
 
-async fn index() -> Html<&'static str> {
-    Html(INDEX_HTML)
+async fn index(State(state): State<AppState>) -> Html<String> {
+    // Token is hex from /dev/urandom; still escape for a JS string literal.
+    let escaped = state
+        .api_token
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\'', "\\'")
+        .replace('<', "\\u003c");
+    Html(INDEX_HTML.replace("%%CCP_API_TOKEN%%", &escaped))
 }
 
 async fn list_presets() -> Json<&'static [presets::Preset]> {
@@ -328,14 +485,44 @@ async fn test_profile(
     Ok(Json(result))
 }
 
-async fn export_profiles(
+/// Masked export only. `?include_secrets=true` on GET is rejected — plaintext
+/// must use POST with an explicit confirmation header (not cacheable).
+async fn export_profiles_get(
     State(state): State<AppState>,
     Query(q): Query<ExportQuery>,
-) -> Result<Json<serde_json::Value>, ApiError> {
+) -> Result<impl IntoResponse, ApiError> {
+    if q.include_secrets {
+        return Err(ApiError::bad_request(
+            "plaintext export requires POST /api/export with header X-Ccp-Confirm: export-secrets"
+                .into(),
+        ));
+    }
+    let body = build_export(&state, false)?;
+    Ok(([(header::CACHE_CONTROL, "no-store")], Json(body)))
+}
+
+async fn export_profiles_post(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<ExportBody>,
+) -> Result<impl IntoResponse, ApiError> {
+    if body.include_secrets {
+        let confirm = headers.get("x-ccp-confirm").and_then(|v| v.to_str().ok());
+        if confirm != Some(EXPORT_SECRETS_CONFIRM) {
+            return Err(ApiError::bad_request(
+                "plaintext export requires header X-Ccp-Confirm: export-secrets".into(),
+            ));
+        }
+    }
+    let payload = build_export(&state, body.include_secrets)?;
+    Ok(([(header::CACHE_CONTROL, "no-store")], Json(payload)))
+}
+
+fn build_export(state: &AppState, include_secrets: bool) -> Result<serde_json::Value, ApiError> {
     let (profiles, _) = state.store.list()?;
     let mut out_profiles = Vec::new();
     for p in profiles {
-        let env = if q.include_secrets {
+        let env = if include_secrets {
             state.store.resolve_env(&p.name)?
         } else {
             p.env
@@ -356,7 +543,7 @@ async fn export_profiles(
             "env": env,
         }));
     }
-    let shared = if q.include_secrets {
+    let shared = if include_secrets {
         state.store.resolve_shared()?
     } else {
         state
@@ -373,16 +560,16 @@ async fn export_profiles(
             })
             .collect()
     };
-    Ok(Json(serde_json::json!({
+    Ok(serde_json::json!({
         "version": 1,
         "profiles": out_profiles,
         "shared": shared,
-        "warning": if q.include_secrets {
+        "warning": if include_secrets {
             "this file contains plaintext tokens — store it accordingly"
         } else {
             "tokens are masked or keychain references; re-enter them after import"
         },
-    })))
+    }))
 }
 
 async fn profile_usage(

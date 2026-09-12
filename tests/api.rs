@@ -9,6 +9,9 @@ use ccp::web::{router, AppState};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
+const TEST_TOKEN: &str = "test-loopback-api-token";
+const TEST_PORT: u16 = 9847;
+
 struct Fixture {
     app: Router,
     _tmp: tempfile::TempDir,
@@ -24,7 +27,13 @@ fn fixture() -> Fixture {
     std::fs::create_dir_all(user_home.join(".claude")).expect("default home");
     let paths = Paths::new(&user_home, &ccp_home);
     let secrets = std::sync::Arc::new(ccp::secret::MemoryStore::default());
-    let app = router(AppState::with_parts(paths, secrets.clone(), |_cmd| Ok(())));
+    let app = router(AppState::with_parts(
+        paths,
+        secrets.clone(),
+        |_cmd| Ok(()),
+        TEST_TOKEN,
+        TEST_PORT,
+    ));
     Fixture {
         app,
         _tmp: tmp,
@@ -44,8 +53,24 @@ async fn call(app: Router, req: Request<Body>) -> (StatusCode, Value) {
     (status, json)
 }
 
+async fn call_raw(app: Router, req: Request<Body>) -> (StatusCode, axum::http::HeaderMap, Value) {
+    let res = app.oneshot(req).await.expect("response");
+    let status = res.status();
+    let headers = res.headers().clone();
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+        .await
+        .expect("body");
+    let json = serde_json::from_slice(&body).unwrap_or(Value::Null);
+    (status, headers, json)
+}
+
 fn get0(path: &str) -> Request<Body> {
-    Request::get(path).body(Body::empty()).unwrap()
+    Request::builder()
+        .method("GET")
+        .uri(path)
+        .header("Authorization", format!("Bearer {TEST_TOKEN}"))
+        .body(Body::empty())
+        .unwrap()
 }
 
 fn json_req(method: &str, path: &str, body: Value) -> Request<Body> {
@@ -53,7 +78,17 @@ fn json_req(method: &str, path: &str, body: Value) -> Request<Body> {
         .method(method)
         .uri(path)
         .header("content-type", "application/json")
+        .header("Authorization", format!("Bearer {TEST_TOKEN}"))
         .body(Body::from(body.to_string()))
+        .unwrap()
+}
+
+fn delete_req(path: &str) -> Request<Body> {
+    Request::builder()
+        .method("DELETE")
+        .uri(path)
+        .header("Authorization", format!("Bearer {TEST_TOKEN}"))
+        .body(Body::empty())
         .unwrap()
 }
 
@@ -234,22 +269,10 @@ async fn delete_requires_confirm_and_keeps_home() {
     )
     .await;
 
-    let (status, _) = call(
-        f.app.clone(),
-        Request::delete("/api/profiles/kimi")
-            .body(Body::empty())
-            .unwrap(),
-    )
-    .await;
+    let (status, _) = call(f.app.clone(), delete_req("/api/profiles/kimi")).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 
-    let (status, _) = call(
-        f.app.clone(),
-        Request::delete("/api/profiles/kimi?confirm=true")
-            .body(Body::empty())
-            .unwrap(),
-    )
-    .await;
+    let (status, _) = call(f.app.clone(), delete_req("/api/profiles/kimi?confirm=true")).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     assert!(!f.ccp_home.join("profiles/kimi.toml").exists());
     assert!(f.user_home.join(".claude-kimi").is_dir(), "home kept");
@@ -257,9 +280,7 @@ async fn delete_requires_confirm_and_keeps_home() {
     // Reserved profile cannot be deleted.
     let (status, _) = call(
         f.app.clone(),
-        Request::delete("/api/profiles/default?confirm=true")
-            .body(Body::empty())
-            .unwrap(),
+        delete_req("/api/profiles/default?confirm=true"),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
@@ -283,10 +304,16 @@ async fn sessions_list_and_launch_with_injected_launcher() {
     let cap = captured.clone();
     let paths = Paths::new(&user_home, &ccp_home);
     let secrets = Arc::new(ccp::secret::MemoryStore::default());
-    let app = router(AppState::with_parts(paths, secrets, move |cmd| {
-        cap.lock().unwrap().push(cmd.to_string());
-        Ok(())
-    }));
+    let app = router(AppState::with_parts(
+        paths,
+        secrets,
+        move |cmd| {
+            cap.lock().unwrap().push(cmd.to_string());
+            Ok(())
+        },
+        TEST_TOKEN,
+        TEST_PORT,
+    ));
 
     // Sessions for the default profile come from its real projects/ dir.
     let (status, body) = call(app.clone(), get0("/api/profiles/default/sessions")).await;
@@ -420,7 +447,7 @@ async fn export_masks_and_import_respects_policy() {
     )
     .await;
 
-    // Default export shows the keychain marker, never the token.
+    // Default GET export shows the keychain marker, never the token.
     let (status, body) = call(f.app.clone(), get0("/api/export")).await;
     assert_eq!(status, StatusCode::OK);
     let kimi = body["profiles"]
@@ -435,8 +462,32 @@ async fn export_masks_and_import_respects_policy() {
         "🔑 keychain"
     );
 
-    // include_secrets round-trips the real value.
-    let (_, body) = call(f.app.clone(), get0("/api/export?include_secrets=true")).await;
+    // GET ?include_secrets=true is rejected (not cacheable plaintext).
+    let (status, body) = call(f.app.clone(), get0("/api/export?include_secrets=true")).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+
+    // POST without confirm header cannot dump secrets.
+    let (status, _) = call(
+        f.app.clone(),
+        json_req("POST", "/api/export", json!({"include_secrets": true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // Authenticated POST + confirm header round-trips the real value.
+    let (status, body) = call(
+        f.app.clone(),
+        Request::builder()
+            .method("POST")
+            .uri("/api/export")
+            .header("content-type", "application/json")
+            .header("Authorization", format!("Bearer {TEST_TOKEN}"))
+            .header("X-Ccp-Confirm", "export-secrets")
+            .body(Body::from(json!({"include_secrets": true}).to_string()))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(
         body["profiles"][1]["env"]["ANTHROPIC_AUTH_TOKEN"],
         "sk-secret-1234567890"
@@ -485,6 +536,115 @@ async fn export_masks_and_import_respects_policy() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn api_requires_token_and_rejects_cross_origin() {
+    let f = fixture();
+
+    // No token → 401.
+    let (status, body) = call(
+        f.app.clone(),
+        Request::get("/api/profiles").body(Body::empty()).unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+
+    // Wrong token → 401.
+    let (status, _) = call(
+        f.app.clone(),
+        Request::builder()
+            .method("GET")
+            .uri("/api/profiles")
+            .header("Authorization", "Bearer wrong")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // Evil Origin → 403 even with a valid token.
+    let (status, headers, _) = call_raw(
+        f.app.clone(),
+        Request::builder()
+            .method("GET")
+            .uri("/api/profiles")
+            .header("Authorization", format!("Bearer {TEST_TOKEN}"))
+            .header("Origin", "https://evil.example")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(headers
+        .get("access-control-allow-private-network")
+        .is_none());
+
+    // Loopback Origin is allowed.
+    let (status, headers, _) = call_raw(
+        f.app.clone(),
+        Request::builder()
+            .method("GET")
+            .uri("/api/profiles")
+            .header("Authorization", format!("Bearer {TEST_TOKEN}"))
+            .header("Origin", format!("http://127.0.0.1:{TEST_PORT}"))
+            .header("Host", format!("127.0.0.1:{TEST_PORT}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(headers
+        .get("access-control-allow-private-network")
+        .is_none());
+
+    // Non-loopback Host → 403.
+    let (status, _) = call(
+        f.app.clone(),
+        Request::builder()
+            .method("GET")
+            .uri("/api/profiles")
+            .header("Authorization", format!("Bearer {TEST_TOKEN}"))
+            .header("Host", "evil.example")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // GUI page injects the token placeholder replacement (no auth on `/`).
+    let res = f
+        .app
+        .oneshot(Request::get("/").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let html = String::from_utf8(
+        axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(html.contains(&format!("window.__CCP_API_TOKEN__ = \"{TEST_TOKEN}\"")));
+    assert!(!html.contains("%%CCP_API_TOKEN%%"));
+}
+
+#[tokio::test]
+async fn api_token_file_is_created_with_0600() {
+    let tmp = tempfile::tempdir().unwrap();
+    let paths = Paths::new(tmp.path().join("home"), tmp.path().join("ccp"));
+    let token = ccp::web::load_or_create_api_token(&paths).unwrap();
+    assert_eq!(token.len(), 64);
+    let path = paths.api_token_file();
+    let meta = std::fs::metadata(&path).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(meta.permissions().mode() & 0o777, 0o600);
+    }
+    let again = ccp::web::load_or_create_api_token(&paths).unwrap();
+    assert_eq!(again, token);
 }
 
 #[tokio::test]
