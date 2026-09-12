@@ -515,3 +515,80 @@ async fn shared_overlay_roundtrip_masked() {
     let (_, body) = call(f.app.clone(), get0("/api/shared")).await;
     assert!(body["SECRET"].is_null());
 }
+
+#[tokio::test]
+async fn rejects_metacharacter_env_keys() {
+    let f = fixture();
+    let evil = "FOO; touch /tmp/pwned; BAR";
+
+    // Create rejects injectable keys.
+    let (status, body) = call(
+        f.app.clone(),
+        json_req(
+            "POST",
+            "/api/profiles",
+            json!({"name": "kimi", "env": { (evil): "x" }}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(
+        body["error"].as_str().unwrap().contains("invalid env key"),
+        "{body}"
+    );
+
+    // Happy create, then update rejects.
+    call(
+        f.app.clone(),
+        json_req("POST", "/api/profiles", json!({"name": "kimi", "env": {}})),
+    )
+    .await;
+    let (status, body) = call(
+        f.app.clone(),
+        json_req("PUT", "/api/profiles/kimi", json!({"env": { (evil): "x" }})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+
+    // Shared overlay rejects.
+    let (status, body) = call(
+        f.app.clone(),
+        json_req("PUT", "/api/shared", json!({"env": { (evil): "x" }})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+
+    // Import records per-profile errors and does not write the key.
+    let (status, body) = call(
+        f.app.clone(),
+        json_req(
+            "POST",
+            "/api/import",
+            json!({
+                "profiles": [{"name": "evil", "env": { (evil): "x" }}]
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(!body["errors"].as_array().unwrap().is_empty(), "{body}");
+    assert!(
+        !f.ccp_home.join("profiles/evil.toml").exists(),
+        "profile with evil key must not be created"
+    );
+
+    // Shared import fails closed.
+    let (status, body) = call(
+        f.app.clone(),
+        json_req(
+            "POST",
+            "/api/import",
+            json!({
+                "profiles": [],
+                "shared": { (evil): "x" }
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+}
