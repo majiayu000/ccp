@@ -442,7 +442,7 @@ async fn export_masks_and_import_respects_policy() {
         "sk-secret-1234567890"
     );
 
-    // Import skip policy leaves existing untouched.
+    // Omitted policy defaults to skip and leaves existing untouched.
     let (status, body) = call(
         f.app.clone(),
         json_req(
@@ -456,6 +456,22 @@ async fn export_masks_and_import_respects_policy() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["skipped"], json!(["kimi"]));
     assert_eq!(body["created"], json!(["zhipu"]));
+    let raw = std::fs::read_to_string(f.ccp_home.join("profiles/kimi.toml")).unwrap();
+    assert!(!raw.contains("A = "));
+
+    // Explicit policy "skip" also leaves existing untouched (GUI path).
+    let (status, body) = call(
+        f.app.clone(),
+        json_req(
+            "POST",
+            "/api/import",
+            json!({"policy": "skip",
+                   "profiles": [{"name": "kimi", "env": {"A": "should-not-apply"}}]}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["skipped"], json!(["kimi"]));
     let raw = std::fs::read_to_string(f.ccp_home.join("profiles/kimi.toml")).unwrap();
     assert!(!raw.contains("A = "));
 
