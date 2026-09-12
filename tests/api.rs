@@ -487,6 +487,22 @@ async fn export_masks_and_import_respects_policy() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
+#[test]
+fn index_html_resume_avoids_onclick_esc_cwd() {
+    // SEC-XSS (#9): esc() inside onclick is HTML-decoded before JS parses the
+    // handler, so a cwd containing ' can break out. Resume must use data-* +
+    // addEventListener instead of embedding esc(s.cwd) in onclick source.
+    let html = ccp::page::INDEX_HTML;
+    assert!(
+        !html.contains("onclick=\"doResume('${esc(name)}','${esc(s.id)}','${esc(s.cwd"),
+        "INDEX_HTML must not embed esc()'d cwd inside doResume onclick handlers"
+    );
+    assert!(
+        html.contains("data-cwd=") && html.contains("addEventListener"),
+        "resume buttons should wire doResume via data-cwd + addEventListener"
+    );
+}
+
 #[tokio::test]
 async fn shared_overlay_roundtrip_masked() {
     let f = fixture();

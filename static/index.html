@@ -434,15 +434,28 @@ async function loadSessions(name) {
   list.innerHTML = '<div class="sess-empty">扫描中…</div>';
   try {
     const items = await api(`/api/profiles/${encodeURIComponent(name)}/sessions`);
-    list.innerHTML = items.length ? items.map(s => `
+    if (!items.length) {
+      list.innerHTML = '<div class="sess-empty">还没有历史会话</div>';
+      return;
+    }
+    // Do not put untrusted fields (cwd, etc.) inside onclick="...": HTML entity
+    // decoding turns &#39; back into ' before the JS engine parses the handler.
+    // data-* + addEventListener keeps values out of executable handler source.
+    list.innerHTML = items.map(s => `
       <div class="sess">
         <span class="preview">${esc(s.preview)}</span>
         ${s.cwd ? `<span class="meta" title="${esc(s.cwd)}">${esc(s.cwd)}</span>` : ""}
         <span class="time">${relTime(s.modified)}</span>
-        <button class="btn-ghost btn-sm"
-          onclick="doResume('${esc(name)}','${esc(s.id)}','${esc(s.cwd || "")}')">续聊</button>
-      </div>`).join("")
-      : '<div class="sess-empty">还没有历史会话</div>';
+        <button type="button" class="btn-ghost btn-sm resume-btn"
+          data-name="${esc(name)}"
+          data-id="${esc(s.id)}"
+          data-cwd="${esc(s.cwd || "")}">续聊</button>
+      </div>`).join("");
+    list.querySelectorAll(".resume-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        doResume(btn.dataset.name, btn.dataset.id, btn.dataset.cwd || "");
+      });
+    });
   } catch (e) {
     list.innerHTML = `<div class="sess-empty">加载失败:${esc(e.message)}</div>`;
   }
