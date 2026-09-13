@@ -23,6 +23,7 @@ const SHARED_SLOT: &str = "_shared";
 #[derive(Debug)]
 pub enum StoreError {
     InvalidName(String),
+    InvalidEnvKey(String),
     Reserved(String),
     Exists(String),
     HomeExists(PathBuf),
@@ -35,6 +36,9 @@ impl fmt::Display for StoreError {
         match self {
             Self::InvalidName(n) => {
                 write!(f, "invalid profile name: {n:?} (want [a-z0-9][a-z0-9-]*)")
+            }
+            Self::InvalidEnvKey(k) => {
+                write!(f, "invalid env key: {k:?} (want [A-Za-z_][A-Za-z0-9_]*)")
             }
             Self::Reserved(n) => write!(f, "operation not allowed on reserved profile {n:?}"),
             Self::Exists(n) => write!(f, "profile {n:?} already exists"),
@@ -182,6 +186,7 @@ impl ProfileStore {
         if home.exists() {
             return Err(StoreError::HomeExists(home));
         }
+        validate_env_keys(env.keys())?;
         let env = self.protect_secrets(name, env)?;
         fs::create_dir_all(&home)?;
         self.apply_templates(&home);
@@ -225,6 +230,7 @@ impl ProfileStore {
         patch: BTreeMap<String, String>,
     ) -> Result<Profile, StoreError> {
         validate_name(name)?;
+        validate_env_keys(patch.keys())?;
         let mut file = self.read_profile_file(name).unwrap_or_default();
         for (k, v) in patch {
             if v.is_empty() {
@@ -338,6 +344,7 @@ impl ProfileStore {
     }
 
     pub fn write_shared(&self, patch: BTreeMap<String, String>) -> Result<(), StoreError> {
+        validate_env_keys(patch.keys())?;
         let patch = self.protect_secrets(SHARED_SLOT, patch)?;
         let mut env = self.read_shared()?;
         for (k, v) in patch {
@@ -448,12 +455,34 @@ pub fn is_valid_name(name: &str) -> bool {
             .is_some_and(|c| c.is_ascii_alphanumeric())
 }
 
+/// POSIX portable env name: `[A-Za-z_][A-Za-z0-9_]*`.
+///
+/// Keys that fail this check must never be concatenated into the shell line
+/// built by `launch::build_command`.
+pub fn is_valid_env_key(key: &str) -> bool {
+    let mut chars = key.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
 fn validate_name(name: &str) -> Result<(), StoreError> {
     if is_valid_name(name) {
         Ok(())
     } else {
         Err(StoreError::InvalidName(name.into()))
     }
+}
+
+fn validate_env_keys<'a>(keys: impl IntoIterator<Item = &'a String>) -> Result<(), StoreError> {
+    for k in keys {
+        if !is_valid_env_key(k) {
+            return Err(StoreError::InvalidEnvKey(k.clone()));
+        }
+    }
+    Ok(())
 }
 
 /// Write a file readable only by the owner (tokens live in these).
@@ -494,6 +523,19 @@ mod tests {
         assert!(!is_valid_name("Kimi"));
         assert!(!is_valid_name("ki mi"));
         assert!(!is_valid_name("ki/mi"));
+    }
+
+    #[test]
+    fn env_key_validation() {
+        assert!(is_valid_env_key("ANTHROPIC_BASE_URL"));
+        assert!(is_valid_env_key("_private"));
+        assert!(is_valid_env_key("a1"));
+        assert!(!is_valid_env_key(""));
+        assert!(!is_valid_env_key("1ABC"));
+        assert!(!is_valid_env_key("FOO; touch /tmp/pwned; BAR"));
+        assert!(!is_valid_env_key("FOO BAR"));
+        assert!(!is_valid_env_key("FOO=BAR"));
+        assert!(!is_valid_env_key("FOO$USER"));
     }
 
     #[test]

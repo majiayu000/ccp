@@ -458,7 +458,8 @@ async fn launch_profile(
         &env,
         body.resume.as_deref(),
         body.cwd.as_deref(),
-    );
+    )
+    .map_err(|e| ApiError::bad_request(e.to_string()))?;
     (state.launcher)(&cmd).map_err(|e| ApiError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         message: format!("failed to open Terminal: {e}"),
@@ -680,7 +681,9 @@ impl ApiError {
 impl From<StoreError> for ApiError {
     fn from(e: StoreError) -> Self {
         let status = match &e {
-            StoreError::InvalidName(_) | StoreError::Reserved(_) => StatusCode::BAD_REQUEST,
+            StoreError::InvalidName(_) | StoreError::InvalidEnvKey(_) | StoreError::Reserved(_) => {
+                StatusCode::BAD_REQUEST
+            }
             StoreError::Exists(_) | StoreError::HomeExists(_) => StatusCode::CONFLICT,
             StoreError::NotFound(_) => StatusCode::NOT_FOUND,
             StoreError::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
