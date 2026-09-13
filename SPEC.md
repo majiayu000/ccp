@@ -67,6 +67,7 @@ Data dir: `$CCP_HOME` env, else `~/.ccp/`
 ```
 ~/.ccp/
 ├── config.toml                     # server config (port etc.)
+├── api_token                       # loopback API bearer (0600); injected into GUI only
 ├── shared.toml                     # optional env overlay applied to EVERY profile
 └── profiles/
     ├── default.toml                # env overlay for ~/.claude (usually empty)
@@ -149,7 +150,7 @@ Server config (`config.toml`): `port = 9847` default, overridable by
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/` | Embedded single-page UI |
+| GET | `/` | Embedded single-page UI (injects a loopback API bearer token; never exposed via a separate GET) |
 | GET | `/api/presets` | List presets (grouped by category) |
 | GET | `/api/profiles` | List managed profiles + unmanaged `~/.claude-*` dirs found |
 | POST | `/api/profiles` | Create profile `{name, preset?, env: {K: V}}` — writes profile TOML (0600), creates `~/.claude-<name>/`, applies template symlinks |
@@ -160,9 +161,13 @@ Server config (`config.toml`): `port = 9847` default, overridable by
 | GET | `/api/profiles/{name}/sessions` | Scan `home/projects/**/*.jsonl`, return recent sessions (id, cwd, first user message preview, mtime) |
 | POST | `/api/profiles/{name}/launch` | Body `{resume?: sessionId, cwd?: string}` → spawn Terminal window with env + `claude [--resume id]` |
 | POST | `/api/profiles/{name}/test` | M3: connectivity check — timed request to the profile's base URL with its token; returns latency + auth ok/fail |
-| GET/POST | `/api/export`, `/api/import` | M3: JSON export of all profiles (tokens masked unless `?include_secrets=true`), import with conflict policy `skip|overwrite` |
+| GET | `/api/export` | Masked JSON export only (`Cache-Control: no-store`). `?include_secrets=true` is rejected. |
+| POST | `/api/export` | Body `{include_secrets?: bool}`. Plaintext secrets require header `X-Ccp-Confirm: export-secrets`. |
+| POST | `/api/import` | Import with conflict policy `skip\|overwrite` |
 
-Token values are never returned by GET APIs (only key names + masked value).
+All `/api/*` routes require `Authorization: Bearer <token>` (or `X-Ccp-Token`), where the token is persisted at `~/.ccp/api_token` (0600) and injected into the GUI HTML. Requests with a non-loopback `Host` or a cross-origin `Origin` are rejected with 403. The server never sends `Access-Control-Allow-Private-Network`.
+
+Token values are never returned by GET APIs (only key names + masked value). Plaintext tokens are only available via authenticated POST `/api/export` with an explicit confirmation header.
 
 ## Launch mechanism (macOS)
 

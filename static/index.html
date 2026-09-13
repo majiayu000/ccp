@@ -239,6 +239,7 @@
 <div id="toast"></div>
 
 <script>
+window.__CCP_API_TOKEN__ = "%%CCP_API_TOKEN%%";
 const STD_FIELDS = [
   ["f-base",  "ANTHROPIC_BASE_URL"],
   ["f-token", "ANTHROPIC_AUTH_TOKEN"],
@@ -257,7 +258,11 @@ const openUsage = new Set();  // profile names with usage expanded
 
 /* ---------- helpers ---------- */
 async function api(path, opts = {}) {
-  const res = await fetch(path, { headers: { "content-type": "application/json" }, ...opts });
+  const headers = Object.assign({
+    "content-type": "application/json",
+    "Authorization": "Bearer " + window.__CCP_API_TOKEN__,
+  }, opts.headers || {});
+  const res = await fetch(path, { ...opts, headers });
   if (!res.ok) {
     let msg = res.statusText;
     try { msg = (await res.json()).error || msg; } catch (_) {}
@@ -522,7 +527,13 @@ async function doExport() {
   const withSecrets = confirm(
     "导出全部 profile 配置?\n\n「确定」= 包含 token 明文(文件请妥善保管)\n「取消」= token 脱敏(导入后需重新填写 token)");
   try {
-    const data = await api(`/api/export${withSecrets ? "?include_secrets=true" : ""}`);
+    const data = withSecrets
+      ? await api("/api/export", {
+          method: "POST",
+          headers: { "X-Ccp-Confirm": "export-secrets" },
+          body: JSON.stringify({ include_secrets: true }),
+        })
+      : await api("/api/export");
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);

@@ -59,4 +59,10 @@ impl Paths {
     pub fn config_file(&self) -> PathBuf {
         self.ccp_home.join("config.toml")
     }
+
+    /// Loopback API bearer token (0600). Known only to `ccp serve` and the
+    /// embedded GUI page it injects — never returned by a cacheable GET.
+    pub fn api_token_file(&self) -> PathBuf {
+        self.ccp_home.join("api_token")
+    }
 }

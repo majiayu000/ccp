@@ -22,5 +22,8 @@ accepted, a fix lands on `main` and the advisory is published after.
 ccp runs a localhost-only HTTP server (127.0.0.1) that can read and write
 files under `~/.ccp/` and launch terminal windows via osascript. API tokens
 are stored in the macOS Keychain; profile files hold only an `@keychain`
-marker and are written with 0600 permissions. Issues that weaken any of
-these properties are in scope and treated as security bugs.
+marker and are written with 0600 permissions. The HTTP API requires a
+loopback bearer token (also 0600 under `~/.ccp/api_token`), rejects
+cross-origin/`Host` requests, and never returns plaintext secrets over GET.
+Issues that weaken any of these properties are in scope and treated as
+security bugs.
