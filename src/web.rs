@@ -411,12 +411,15 @@ async fn import_profiles(
     Json(body): Json<ImportRequest>,
 ) -> Result<Json<ImportSummary>, ApiError> {
     let mut summary = ImportSummary::default();
-    let overwrite = body.policy.as_deref() == Some("overwrite");
-    if body.policy.is_some() && !overwrite {
-        return Err(ApiError::bad_request(
-            "policy must be \"skip\" or \"overwrite\"".into(),
-        ));
-    }
+    let overwrite = match body.policy.as_deref() {
+        None | Some("skip") => false,
+        Some("overwrite") => true,
+        Some(_) => {
+            return Err(ApiError::bad_request(
+                "policy must be \"skip\" or \"overwrite\"".into(),
+            ));
+        }
+    };
     for p in body.profiles {
         let name = p.name.as_str();
         let exists = state.store.get(name).map(|pr| pr.managed).unwrap_or(false)
