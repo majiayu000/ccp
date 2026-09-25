@@ -90,15 +90,28 @@ pub fn scan(home: &Path, since_secs: u64) -> io::Result<UsageReport> {
 }
 
 fn parse_file(path: &Path, seen: &mut HashSet<String>, report: &mut UsageReport) -> io::Result<()> {
-    use std::io::BufRead;
     let file = fs::File::open(path)?;
-    for line in io::BufReader::new(file).lines() {
-        let line = line?;
+    let records = agent_sessions::read_raw_from(
+        io::BufReader::new(file),
+        &agent_sessions::RawReadOptions {
+            max_read_bytes: None,
+            max_line_bytes: None,
+            ..Default::default()
+        },
+    )
+    .map_err(io::Error::other)?;
+    for record in records {
+        let record = record.map_err(|error| match error {
+            agent_sessions::StreamError::Io(error) => error,
+            error => io::Error::other(error),
+        })?;
+        let line = std::str::from_utf8(&record.bytes)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
         // Cheap gate: usage objects only appear on assistant usage lines.
         if !line.contains("\"usage\"") {
             continue;
         }
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
             continue;
         };
         let Some(usage) = v.pointer("/message/usage") else {
@@ -192,5 +205,30 @@ mod tests {
         let report = scan(tmp.path(), now - 30 * 86400).unwrap();
         assert_eq!(report.files, 0);
         assert_eq!(report.totals.output, 0);
+    }
+    #[test]
+    fn legacy_usage_policy_preserves_unknown_dates_and_zero_sample_dedup() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("usage.jsonl");
+        fs::write(&path, concat!(
+            "{bad}\n",
+            "{\"message\":{\"id\":\"zero\",\"usage\":{}}}\n",
+            "{\"message\":{\"id\":\"zero\",\"usage\":{\"input_tokens\":99}}}\n",
+            "{\"message\":{\"model\":\"test\",\"usage\":{\"input_tokens\":3,\"output_tokens\":-1}}}\r\n",
+            "{\"timestamp\":\"not-a-date-anymore\",\"message\":{\"usage\":{\"cache_read_input_tokens\":7}}}"
+        )).unwrap();
+        let mut report = UsageReport::default();
+        parse_file(&path, &mut HashSet::new(), &mut report).unwrap();
+        assert_eq!(report.totals.input, 3);
+        assert_eq!(report.days["unknown"].input, 3);
+        assert_eq!(report.days["not-a-date"].cache_read, 7);
+        assert_eq!(report.models["test"], 0);
+        fs::write(&path, [0xff]).unwrap();
+        assert_eq!(
+            parse_file(&path, &mut HashSet::new(), &mut report)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
     }
 }
