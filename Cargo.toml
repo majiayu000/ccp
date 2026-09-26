@@ -2,10 +2,12 @@
 name = "ccp"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.88"
 description = "Claude Code Profiles — isolated per-provider configs with a local web GUI"
 license = "MIT"
 
 [dependencies]
+agent-sessions = "0.2.0"
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }

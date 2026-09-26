@@ -92,10 +92,16 @@ browser ──HTTP──> ccp serve (axum, 127.0.0.1 only)
 
 `~/.claude/settings.json` is never read or written by ccp.
 
+Transcript framing and conversation projections use `agent-sessions`. History
+previews still inspect only the first 64 KiB, keep the first user text block,
+and show at most 100 characters. Profile roots and resumable filename filtering
+remain local policies. Usage aggregation retains its existing message-ID dedup,
+raw timestamp date labels, and zero treatment for missing or invalid counters.
+
 ## Development
 
 ```sh
-cargo test                                   # 29 tests, no live server needed
+cargo test                                   # unit/API tests, no live server needed
 cargo clippy --all-targets -- -D warnings
 cargo fmt --all
 ```
