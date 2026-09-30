@@ -525,7 +525,7 @@ async function importAll(names) {
 /* ---------- export / import ---------- */
 async function doExport() {
   const withSecrets = confirm(
-    "导出全部 profile 配置?\n\n「确定」= 包含 token 明文(文件请妥善保管)\n「取消」= 保留 Keychain 引用(已有 token 不变,缺少的需重新填写)");
+    "导出全部 profile 配置?\n\n「确定」= 包含 env 明文(文件请妥善保管)\n「取消」= 全部 env 脱敏(匹配的已有值保留,缺少或变更的需重新填写)");
   try {
     const data = withSecrets
       ? await api("/api/export", {
@@ -540,7 +540,7 @@ async function doExport() {
     a.download = `ccp-profiles-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(a.href);
-    toast(withSecrets ? "已导出(含明文 token)" : "已导出(token 已脱敏)", "ok");
+    toast(withSecrets ? "已导出(含明文 env)" : "已导出(env 已脱敏)", "ok");
   } catch (e) { toast(e.message, "err"); }
 }
 function pickImport() { document.getElementById("import-file").click(); }

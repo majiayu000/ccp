@@ -529,11 +529,7 @@ fn build_export(state: &AppState, include_secrets: bool) -> Result<serde_json::V
             p.env
                 .into_iter()
                 .map(|(k, v)| {
-                    let value = if secret::is_secret_key(&k) {
-                        secret::MARKER.to_string()
-                    } else {
-                        v
-                    };
+                    let value = if secret::is_marker(&v) { v } else { mask(&v) };
                     (k, value)
                 })
                 .collect()
@@ -552,11 +548,7 @@ fn build_export(state: &AppState, include_secrets: bool) -> Result<serde_json::V
             .read_shared()?
             .into_iter()
             .map(|(k, v)| {
-                let value = if secret::is_secret_key(&k) {
-                    secret::MARKER.to_string()
-                } else {
-                    v
-                };
+                let value = if secret::is_marker(&v) { v } else { mask(&v) };
                 (k, value)
             })
             .collect()
@@ -568,7 +560,7 @@ fn build_export(state: &AppState, include_secrets: bool) -> Result<serde_json::V
         "warning": if include_secrets {
             "this file contains plaintext tokens — store it accordingly"
         } else {
-            "tokens are keychain references; existing tokens are preserved, but missing tokens must be re-entered after import"
+            "env values are masked or keychain references; matching existing values are preserved on import, but missing or changed values must be re-entered"
         },
     }))
 }

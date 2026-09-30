@@ -673,9 +673,9 @@ async fn masked_export_import_preserves_env_and_tokens() {
     assert_roundtrip_values_unchanged(&f, &profile, &shared);
     let env = &export["profiles"][1]["env"];
     assert_eq!(env["ANTHROPIC_AUTH_TOKEN"], "@keychain");
-    assert_eq!(env["ANTHROPIC_BASE_URL"], "https://example.test/anthropic");
-    assert_eq!(env["ANTHROPIC_MODEL"], "test-model");
-    assert_eq!(env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"], "1");
+    assert_eq!(env["ANTHROPIC_BASE_URL"], "http…opic");
+    assert_eq!(env["ANTHROPIC_MODEL"], "test…odel");
+    assert_eq!(env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"], "•••");
     assert_eq!(export["shared"], *env);
 }
 
@@ -708,7 +708,7 @@ async fn displayed_env_roundtrip_preserves_env_and_tokens() {
 }
 
 #[tokio::test]
-async fn display_placeholders_are_not_saved_on_create() {
+async fn literal_mask_shapes_are_saved() {
     let f = fixture();
     let (status, _) = call(
         f.app.clone(),
@@ -720,7 +720,8 @@ async fn display_placeholders_are_not_saved_on_create() {
                     "ANTHROPIC_AUTH_TOKEN": "🔑 keychain",
                     "ANTHROPIC_API_KEY": "sk-a…5678",
                     "ANTHROPIC_BASE_URL": "http…opic",
-                    "FLAG": "•••"
+                    "FLAG": "•••",
+                    "MODEL": "abcd…wxyz"
                 }
             }),
         ),
@@ -729,10 +730,56 @@ async fn display_placeholders_are_not_saved_on_create() {
     assert_eq!(status, StatusCode::CREATED);
     let raw = std::fs::read_to_string(f.ccp_home.join("profiles/test.toml")).unwrap();
     let stored: toml::Value = toml::from_str(&raw).unwrap();
-    assert!(stored["env"].as_table().unwrap().is_empty());
-    for key in ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"] {
-        assert_eq!(f.secrets.get("test", key).unwrap(), None);
+    assert_eq!(
+        stored["env"]["ANTHROPIC_BASE_URL"].as_str(),
+        Some("http…opic")
+    );
+    assert_eq!(stored["env"]["FLAG"].as_str(), Some("•••"));
+    assert_eq!(stored["env"]["MODEL"].as_str(), Some("abcd…wxyz"));
+    for (key, value) in [
+        ("ANTHROPIC_AUTH_TOKEN", "🔑 keychain"),
+        ("ANTHROPIC_API_KEY", "sk-a…5678"),
+    ] {
+        assert_eq!(f.secrets.get("test", key).unwrap().as_deref(), Some(value));
     }
+
+    // Mask-shaped strings are also legitimate new values in write/import patches.
+    for (method, path, body) in [
+        (
+            "PUT",
+            "/api/profiles/test",
+            json!({"env": {"FLAG": "abcd…wxyz", "MODEL": "•••"}}),
+        ),
+        (
+            "PUT",
+            "/api/shared",
+            json!({"env": {"FLAG": "•••", "MODEL": "abcd…wxyz"}}),
+        ),
+        (
+            "POST",
+            "/api/import",
+            json!({"policy": "overwrite", "profiles": [
+            {"name": "test", "env": {"FLAG": "•••", "MODEL": "http…opic"}},
+            {"name": "new", "env": {"FLAG": "•••", "MODEL": "abcd…wxyz"}}
+        ], "shared": {"FLAG": "abcd…wxyz", "MODEL": "•••"}}),
+        ),
+    ] {
+        let (status, result) = call(f.app.clone(), json_req(method, path, body)).await;
+        assert!(status.is_success(), "{result}");
+        if method == "POST" {
+            assert_eq!(result["errors"], json!([]));
+        }
+    }
+    let store = ccp::profile::ProfileStore::with_secrets(
+        Paths::new(&f.user_home, &f.ccp_home),
+        f.secrets.clone(),
+    );
+    assert_eq!(store.get("test").unwrap().env["FLAG"], "•••");
+    assert_eq!(store.get("test").unwrap().env["MODEL"], "http…opic");
+    assert_eq!(store.get("new").unwrap().env["FLAG"], "•••");
+    assert_eq!(store.get("new").unwrap().env["MODEL"], "abcd…wxyz");
+    assert_eq!(store.read_shared().unwrap()["FLAG"], "abcd…wxyz");
+    assert_eq!(store.read_shared().unwrap()["MODEL"], "•••");
 
     // Explicit replacements and empty-value deletion still work for secrets.
     for value in ["test-explicit-token", ""] {
@@ -753,6 +800,55 @@ async fn display_placeholders_are_not_saved_on_create() {
             } else {
                 Some(value.into())
             }
+        );
+    }
+}
+
+#[tokio::test]
+async fn masked_exports_hide_arbitrary_env_credentials() {
+    let f = fixture();
+    let env = json!({
+        "OPENAI_API_KEY": "test-openai-credential",
+        "AWS_SECRET_ACCESS_KEY": "test-aws-credential",
+        "CUSTOM_PROVIDER_VALUE": "test-custom-credential"
+    });
+    let (status, _) = call(
+        f.app.clone(),
+        json_req("POST", "/api/profiles", json!({"name": "test", "env": env})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let (status, _) = call(
+        f.app.clone(),
+        json_req("PUT", "/api/shared", json!({"env": env})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let profile = std::fs::read_to_string(f.ccp_home.join("profiles/test.toml")).unwrap();
+    let shared = std::fs::read_to_string(f.ccp_home.join("shared.toml")).unwrap();
+    for request in [
+        get0("/api/export"),
+        json_req("POST", "/api/export", json!({})),
+    ] {
+        let (status, _, mut export) = call_raw(f.app.clone(), request).await;
+        assert_eq!(status, StatusCode::OK);
+        for value in env.as_object().unwrap().values() {
+            assert!(
+                !export.to_string().contains(value.as_str().unwrap()),
+                "credential disclosed"
+            );
+        }
+        export["policy"] = json!("overwrite");
+        let (status, result) = call(f.app.clone(), json_req("POST", "/api/import", export)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(result["errors"], json!([]));
+        assert_eq!(
+            std::fs::read_to_string(f.ccp_home.join("profiles/test.toml")).unwrap(),
+            profile
+        );
+        assert_eq!(
+            std::fs::read_to_string(f.ccp_home.join("shared.toml")).unwrap(),
+            shared
         );
     }
 }

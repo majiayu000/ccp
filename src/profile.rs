@@ -187,7 +187,7 @@ impl ProfileStore {
             return Err(StoreError::HomeExists(home));
         }
         validate_env_keys(env.keys())?;
-        let env = self.protect_secrets(name, env)?;
+        let env = self.protect_secrets(name, env, &BTreeMap::new())?;
         fs::create_dir_all(&home)?;
         self.apply_templates(&home);
         self.copy_mcp_servers(&home);
@@ -223,7 +223,7 @@ impl ProfileStore {
     }
 
     /// Merge env updates. An empty value deletes the key.
-    /// Display placeholders are ignored so read responses can be round-tripped.
+    /// Values matching the current display are ignored when round-tripped.
     /// Secret values are diverted to the keychain; the file keeps a marker.
     pub fn update_env(
         &self,
@@ -233,7 +233,7 @@ impl ProfileStore {
         validate_name(name)?;
         validate_env_keys(patch.keys())?;
         let mut file = self.read_profile_file(name).unwrap_or_default();
-        let patch = self.protect_secrets(name, patch)?;
+        let patch = self.protect_secrets(name, patch, &file.env)?;
         for (k, v) in patch {
             if v.is_empty() {
                 file.env.remove(&k);
@@ -292,8 +292,21 @@ impl ProfileStore {
         &self,
         name: &str,
         mut env: BTreeMap<String, String>,
+        current: &BTreeMap<String, String>,
     ) -> Result<BTreeMap<String, String>, StoreError> {
-        env.retain(|_, v| !is_display_placeholder(v));
+        // Only the display of this key's stored value is a read-back placeholder.
+        // New values remain valid even if they happen to look like a mask.
+        env.retain(|k, v| {
+            current.get(k).is_none_or(|stored| {
+                v == stored
+                    || *v
+                        != if secret::is_marker(stored) {
+                            "🔑 keychain".to_string()
+                        } else {
+                            mask(stored)
+                        }
+            })
+        });
         for (k, v) in env.iter_mut() {
             if secret::is_secret_key(k) && !v.is_empty() && !secret::is_marker(v) {
                 self.secrets.set(name, k, v).map_err(StoreError::Io)?;
@@ -345,8 +358,8 @@ impl ProfileStore {
 
     pub fn write_shared(&self, patch: BTreeMap<String, String>) -> Result<(), StoreError> {
         validate_env_keys(patch.keys())?;
-        let patch = self.protect_secrets(SHARED_SLOT, patch)?;
         let mut env = self.read_shared()?;
+        let patch = self.protect_secrets(SHARED_SLOT, patch, &env)?;
         for (k, v) in patch {
             if v.is_empty() {
                 env.remove(&k);
@@ -497,13 +510,6 @@ fn write_private(path: &std::path::Path, body: &[u8]) -> Result<(), StoreError> 
         fs::set_permissions(path, fs::Permissions::from_mode(ENV_FILE_MODE))?;
     }
     Ok(())
-}
-
-/// Recognize only the keychain label and the exact forms produced by `mask`.
-fn is_display_placeholder(value: &str) -> bool {
-    value == "🔑 keychain"
-        || value == "•••"
-        || (value.chars().count() == 9 && value.chars().nth(4) == Some('…'))
 }
 
 /// Mask a secret for display: keep tiny affordances, never the substance.
