@@ -250,7 +250,7 @@ impl From<BTreeMap<String, String>> for EnvView {
             env_display: env
                 .into_iter()
                 .map(|(k, v)| {
-                    let shown = if secret::is_marker(&v) {
+                    let shown = if secret::is_secret_key(&k) && secret::is_marker(&v) {
                         "🔑 keychain".to_string()
                     } else {
                         mask(&v)
@@ -699,7 +699,7 @@ async fn import_profiles(
             }
         }
         let result = if exists {
-            state.store.update_env(name, env)
+            state.store.update_profile(name, Some(p.preset), env)
         } else {
             match state.store.import(name, p.preset.clone(), env.clone()) {
                 Err(StoreError::NotFound(_)) => state.store.create(name, p.preset, env),
@@ -717,11 +717,14 @@ async fn import_profiles(
     }
     if let Some(shared) = body.shared {
         let current = if shared.values().any(Option::is_none) {
-            state.store.resolve_shared()?
+            state.store.resolve_shared()
         } else {
-            state.store.read_shared()?
+            Ok(state.store.read_shared()?)
         };
-        match import_env(shared, &current) {
+        let result = current
+            .map_err(ApiError::from)
+            .and_then(|current| import_env(shared, &current));
+        match result {
             Ok(env) => state.store.write_shared(env)?,
             Err(e) => summary.errors.push(ImportError {
                 name: "_shared".into(),

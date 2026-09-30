@@ -227,7 +227,7 @@ impl ProfileStore {
         env.retain(|_, value| !value.is_empty());
         let previous_secrets = env
             .iter()
-            .filter(|(key, value)| secret::is_secret_key(key) && !secret::is_marker(value))
+            .filter(|(key, _)| secret::is_secret_key(key))
             .map(|(key, _)| {
                 self.secrets
                     .get(name, key)
@@ -284,9 +284,23 @@ impl ProfileStore {
         name: &str,
         patch: BTreeMap<String, String>,
     ) -> Result<Profile, StoreError> {
+        self.update_profile(name, None, patch)
+    }
+
+    /// Update env and optionally restore preset metadata in the same file write.
+    /// `None` preserves the preset; `Some(None)` clears it.
+    pub fn update_profile(
+        &self,
+        name: &str,
+        preset: Option<Option<String>>,
+        patch: BTreeMap<String, String>,
+    ) -> Result<Profile, StoreError> {
         validate_name(name)?;
         validate_env_keys(patch.keys())?;
         let mut file = self.read_profile_file(name).unwrap_or_default();
+        if let Some(preset) = preset {
+            file.preset = preset;
+        }
         let patch = self.protect_secrets(name, patch)?;
         for (k, v) in patch {
             if v.is_empty() {
@@ -322,7 +336,7 @@ impl ProfileStore {
     ) -> Result<BTreeMap<String, String>, StoreError> {
         let mut out = BTreeMap::new();
         for (k, v) in env {
-            if secret::is_marker(&v) {
+            if secret::is_secret_key(&k) && secret::is_marker(&v) {
                 let real = self
                     .secrets
                     .get(owner, &k)
@@ -348,7 +362,7 @@ impl ProfileStore {
         mut env: BTreeMap<String, String>,
     ) -> Result<BTreeMap<String, String>, StoreError> {
         for (k, v) in env.iter_mut() {
-            if secret::is_secret_key(k) && !v.is_empty() && !secret::is_marker(v) {
+            if secret::is_secret_key(k) && !v.is_empty() {
                 self.secrets.set(name, k, v).map_err(StoreError::Io)?;
                 *v = secret::MARKER.into();
             }
@@ -370,7 +384,7 @@ impl ProfileStore {
         }
         if let Ok(profile) = self.read_profile(name) {
             for (k, v) in &profile.env {
-                if secret::is_marker(v) {
+                if secret::is_secret_key(k) && secret::is_marker(v) {
                     let _ = self.secrets.delete(name, k);
                 }
             }

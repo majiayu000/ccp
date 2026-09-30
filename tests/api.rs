@@ -629,89 +629,93 @@ async fn backup_import_keychain_failure_does_not_adopt_directory() {
             self.0.delete(profile, key)
         }
     }
-    let f = fixture();
-    std::fs::create_dir_all(f.user_home.join(".claude-kimi")).unwrap();
-    f.secrets
-        .set("kimi", "ANTHROPIC_API_KEY", "test-existing-key")
-        .unwrap();
-    let app = router(AppState::with_parts(
-        Paths::new(&f.user_home, &f.ccp_home),
-        std::sync::Arc::new(FailingSecrets(f.secrets.clone())),
-        |_cmd| Ok(()),
-        TEST_TOKEN,
-        TEST_PORT,
-    ));
-    let (status, body) = call(
+    for replacement in ["test-new-key", "@keychain"] {
+        let f = fixture();
+        std::fs::create_dir_all(f.user_home.join(".claude-kimi")).unwrap();
+        f.secrets
+            .set("kimi", "ANTHROPIC_API_KEY", "test-existing-key")
+            .unwrap();
+        let app = router(AppState::with_parts(
+            Paths::new(&f.user_home, &f.ccp_home),
+            std::sync::Arc::new(FailingSecrets(f.secrets.clone())),
+            |_cmd| Ok(()),
+            TEST_TOKEN,
+            TEST_PORT,
+        ));
+        let (status, body) = call(
         app,
         json_req(
             "POST",
             "/api/import",
             json!({"version": 2, "profiles": [{"name": "kimi",
-                "preset": "moonshot", "env": {"ANTHROPIC_API_KEY": "test-new-key", "ANTHROPIC_AUTH_TOKEN": "test-import-token"}}]}),
+                "preset": "moonshot", "env": {"ANTHROPIC_API_KEY": replacement, "ANTHROPIC_AUTH_TOKEN": "test-import-token"}}]}),
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    assert!(body["created"].as_array().unwrap().is_empty(), "{body}");
-    assert!(
-        body["errors"][0]["error"]
-            .as_str()
-            .unwrap()
-            .contains("test keychain unavailable"),
-        "{body}"
-    );
-    assert!(!f.ccp_home.join("profiles/kimi.toml").exists());
-    assert!(f.user_home.join(".claude-kimi").is_dir());
-    assert_eq!(
-        f.secrets
-            .get("kimi", "ANTHROPIC_API_KEY")
-            .unwrap()
-            .as_deref(),
-        Some("test-existing-key")
-    );
-    assert_eq!(f.secrets.get("kimi", "ANTHROPIC_AUTH_TOKEN").unwrap(), None);
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body["created"].as_array().unwrap().is_empty(), "{body}");
+        assert!(
+            body["errors"][0]["error"]
+                .as_str()
+                .unwrap()
+                .contains("test keychain unavailable"),
+            "{body}"
+        );
+        assert!(!f.ccp_home.join("profiles/kimi.toml").exists());
+        assert!(f.user_home.join(".claude-kimi").is_dir());
+        assert_eq!(
+            f.secrets
+                .get("kimi", "ANTHROPIC_API_KEY")
+                .unwrap()
+                .as_deref(),
+            Some("test-existing-key")
+        );
+        assert_eq!(f.secrets.get("kimi", "ANTHROPIC_AUTH_TOKEN").unwrap(), None);
+    }
 }
 
 #[tokio::test]
 async fn backup_import_reports_adoption_write_error_without_create_fallback() {
-    let f = fixture();
-    std::fs::create_dir_all(f.user_home.join(".claude-kimi")).unwrap();
-    std::fs::write(&f.ccp_home, "block profile writes").unwrap();
-    f.secrets
-        .set("kimi", "ANTHROPIC_AUTH_TOKEN", "test-existing-token")
-        .unwrap();
-    let (status, body) = call(
+    for replacement in ["test-import-token", "@keychain"] {
+        let f = fixture();
+        std::fs::create_dir_all(f.user_home.join(".claude-kimi")).unwrap();
+        std::fs::write(&f.ccp_home, "block profile writes").unwrap();
+        f.secrets
+            .set("kimi", "ANTHROPIC_AUTH_TOKEN", "test-existing-token")
+            .unwrap();
+        let (status, body) = call(
         f.app,
         json_req(
             "POST",
             "/api/import",
             json!({"version": 2, "profiles": [{"name": "kimi",
-                "preset": "moonshot", "env": {"ANTHROPIC_MODEL": "test-model", "ANTHROPIC_AUTH_TOKEN": "test-import-token"}}]}),
+                "preset": "moonshot", "env": {"ANTHROPIC_MODEL": "test-model", "ANTHROPIC_AUTH_TOKEN": replacement}}]}),
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    assert!(body["created"].as_array().unwrap().is_empty(), "{body}");
-    assert!(
-        body["errors"][0]["error"]
-            .as_str()
-            .unwrap()
-            .contains("io error"),
-        "{body}"
-    );
-    assert!(!f.ccp_home.join("profiles/kimi.toml").exists());
-    assert_eq!(
-        std::fs::read_to_string(&f.ccp_home).unwrap(),
-        "block profile writes"
-    );
-    assert!(f.user_home.join(".claude-kimi").is_dir());
-    assert_eq!(
-        f.secrets
-            .get("kimi", "ANTHROPIC_AUTH_TOKEN")
-            .unwrap()
-            .as_deref(),
-        Some("test-existing-token")
-    );
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body["created"].as_array().unwrap().is_empty(), "{body}");
+        assert!(
+            body["errors"][0]["error"]
+                .as_str()
+                .unwrap()
+                .contains("io error"),
+            "{body}"
+        );
+        assert!(!f.ccp_home.join("profiles/kimi.toml").exists());
+        assert_eq!(
+            std::fs::read_to_string(&f.ccp_home).unwrap(),
+            "block profile writes"
+        );
+        assert!(f.user_home.join(".claude-kimi").is_dir());
+        assert_eq!(
+            f.secrets
+                .get("kimi", "ANTHROPIC_AUTH_TOKEN")
+                .unwrap()
+                .as_deref(),
+            Some("test-existing-token")
+        );
+    }
 }
 
 #[tokio::test]
@@ -1307,8 +1311,9 @@ async fn redacted_import_reports_missing_keychain_values() {
         ),
     )
     .await;
-    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{result}");
-    assert!(result["error"]
+    assert_eq!(status, StatusCode::OK, "{result}");
+    assert_eq!(result["errors"][0]["name"], "_shared");
+    assert!(result["errors"][0]["error"]
         .as_str()
         .unwrap()
         .contains("no keychain entry"));
@@ -1325,6 +1330,260 @@ async fn redacted_import_reports_missing_keychain_values() {
         f.secrets.get("_shared", "ANTHROPIC_AUTH_TOKEN").unwrap(),
         None
     );
+}
+
+#[tokio::test]
+async fn literal_keychain_values_survive_api_writes_and_exports() {
+    let env = json!({"ANTHROPIC_AUTH_TOKEN": "@keychain",
+        "ANTHROPIC_API_KEY": "@keychain", "ANTHROPIC_BASE_URL": "@keychain"});
+    for (method, path, body, owner) in [
+        (
+            "POST",
+            "/api/profiles",
+            json!({"name": "new", "env": env}),
+            "new",
+        ),
+        ("PUT", "/api/profiles/test", json!({"env": env}), "test"),
+        ("PUT", "/api/shared", json!({"env": env}), "_shared"),
+        (
+            "POST",
+            "/api/import",
+            json!({"version": 2, "policy": "overwrite",
+            "profiles": [{"name": "test", "env": env}, {"name": "new", "env": env},
+                {"name": "adopted", "env": env}], "shared": env}),
+            "adopted",
+        ),
+    ] {
+        let f = roundtrip_fixture();
+        std::fs::create_dir_all(f.user_home.join(".claude-adopted")).unwrap();
+        let store = ccp::profile::ProfileStore::with_secrets(
+            Paths::new(&f.user_home, &f.ccp_home),
+            f.secrets.clone(),
+        );
+        let (status, result) = call(f.app.clone(), json_req(method, path, body)).await;
+        assert!(status.is_success(), "{method} {path}: {result}");
+        if path == "/api/import" {
+            assert_eq!(result["errors"], json!([]));
+        }
+        let owners = if path == "/api/import" {
+            vec!["test", "new", "adopted", "_shared"]
+        } else {
+            vec![owner]
+        };
+        for owner in &owners {
+            let resolved = if *owner == "_shared" {
+                store.resolve_shared().unwrap()
+            } else {
+                store.resolve_env(owner).unwrap()
+            };
+            for key in env.as_object().unwrap().keys() {
+                assert_eq!(resolved[key], "@keychain", "{method} {path} {owner}/{key}");
+            }
+            for key in ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"] {
+                assert_eq!(
+                    f.secrets.get(owner, key).unwrap().as_deref(),
+                    Some("@keychain")
+                );
+            }
+            assert_eq!(f.secrets.get(owner, "ANTHROPIC_BASE_URL").unwrap(), None);
+        }
+        let (status, _, mut export) = call_raw(
+            f.app.clone(),
+            Request::builder()
+                .method("POST")
+                .uri("/api/export")
+                .header("content-type", "application/json")
+                .header("Authorization", format!("Bearer {TEST_TOKEN}"))
+                .header("X-Ccp-Confirm", "export-secrets")
+                .body(Body::from(json!({"include_secrets": true}).to_string()))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{export}");
+        for owner in &owners {
+            let exported = if *owner == "_shared" {
+                &export["shared"]
+            } else {
+                &export["profiles"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|p| p["name"] == *owner)
+                    .unwrap()["env"]
+            };
+            for key in env.as_object().unwrap().keys() {
+                assert_eq!(exported[key], "@keychain");
+            }
+        }
+        export["policy"] = json!("overwrite");
+        let (status, summary) = call(f.app.clone(), json_req("POST", "/api/import", export)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(summary["errors"], json!([]));
+        let (status, _, mut redacted) = call_raw(f.app.clone(), get0("/api/export")).await;
+        assert_eq!(status, StatusCode::OK);
+        redacted["policy"] = json!("overwrite");
+        let (_, summary) = call(f.app.clone(), json_req("POST", "/api/import", redacted)).await;
+        assert_eq!(summary["errors"], json!([]));
+        for owner in owners {
+            let read_path = if owner == "_shared" {
+                "/api/shared".into()
+            } else {
+                format!("/api/profiles/{owner}")
+            };
+            let view = if owner == "_shared" {
+                call(f.app.clone(), get0(&read_path)).await.1
+            } else {
+                let (_, listed) = call(f.app.clone(), get0("/api/profiles")).await;
+                listed["profiles"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|p| p["name"] == owner)
+                    .unwrap()
+                    .clone()
+            };
+            assert_eq!(view["env_display"]["ANTHROPIC_BASE_URL"], "@key…hain");
+            let (status, _) = call(f.app.clone(), json_req("PUT", &read_path, view)).await;
+            assert!(status.is_success());
+            let resolved = if owner == "_shared" {
+                store.resolve_shared().unwrap()
+            } else {
+                store.resolve_env(owner).unwrap()
+            };
+            assert_eq!(resolved["ANTHROPIC_AUTH_TOKEN"], "@keychain");
+            assert_eq!(resolved["ANTHROPIC_BASE_URL"], "@keychain");
+            let (status, _) = call(f.app.clone(), json_req("PUT", &read_path,
+                json!({"env": {"ANTHROPIC_AUTH_TOKEN": "", "ANTHROPIC_API_KEY": "", "ANTHROPIC_BASE_URL": ""}}))).await;
+            assert!(status.is_success());
+            assert_eq!(f.secrets.get(owner, "ANTHROPIC_AUTH_TOKEN").unwrap(), None);
+            assert_eq!(f.secrets.get(owner, "ANTHROPIC_API_KEY").unwrap(), None);
+        }
+    }
+}
+
+#[tokio::test]
+async fn shared_keychain_import_error_keeps_profile_summary() {
+    let f = roundtrip_fixture();
+    let shared = std::fs::read_to_string(f.ccp_home.join("shared.toml")).unwrap();
+    f.secrets.delete("_shared", "ANTHROPIC_AUTH_TOKEN").unwrap();
+    let (status, summary) = call(
+        f.app.clone(),
+        json_req(
+            "POST",
+            "/api/import",
+            json!({"version": 2, "policy": "overwrite", "profiles": [
+            {"name": "new", "env": {"ANTHROPIC_MODEL": "new-model"}},
+            {"name": "test", "env": {"ANTHROPIC_MODEL": "updated-model"}}
+        ], "shared": {"ANTHROPIC_AUTH_TOKEN": null, "MODEL": "should-not-write"}}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{summary}");
+    assert_eq!(summary["created"], json!(["new"]));
+    assert_eq!(summary["updated"], json!(["test"]));
+    assert_eq!(summary["errors"].as_array().unwrap().len(), 1);
+    assert_eq!(summary["errors"][0]["name"], "_shared");
+    assert!(summary["errors"][0]["error"]
+        .as_str()
+        .unwrap()
+        .contains("no keychain entry"));
+    assert_eq!(
+        std::fs::read_to_string(f.ccp_home.join("shared.toml")).unwrap(),
+        shared
+    );
+    assert_eq!(
+        f.secrets.get("_shared", "ANTHROPIC_AUTH_TOKEN").unwrap(),
+        None
+    );
+    let store = ccp::profile::ProfileStore::with_secrets(
+        Paths::new(&f.user_home, &f.ccp_home),
+        f.secrets.clone(),
+    );
+    assert_eq!(
+        store.get("new").unwrap().env["ANTHROPIC_MODEL"],
+        "new-model"
+    );
+    assert_eq!(
+        store.get("test").unwrap().env["ANTHROPIC_MODEL"],
+        "updated-model"
+    );
+}
+
+#[tokio::test]
+async fn backup_overwrite_restores_and_clears_preset() {
+    let f = fixture();
+    let store = ccp::profile::ProfileStore::with_secrets(
+        Paths::new(&f.user_home, &f.ccp_home),
+        f.secrets.clone(),
+    );
+    store
+        .create(
+            "test",
+            Some("moonshot".into()),
+            [("MODEL".into(), "old-model".into())].into(),
+        )
+        .unwrap();
+    for (policy, preset, expected) in [
+        ("skip", json!("deepseek"), Some("moonshot")),
+        ("overwrite", json!("deepseek"), Some("deepseek")),
+        ("overwrite", Value::Null, None),
+    ] {
+        let (status, summary) = call(
+            f.app.clone(),
+            json_req(
+                "POST",
+                "/api/import",
+                json!({"version": 2, "policy": policy, "profiles": [
+                    {"name": "test", "preset": preset, "env": {"MODEL": "new-model"}}
+                ]}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{summary}");
+        assert_eq!(summary["errors"], json!([]));
+        assert_eq!(store.get("test").unwrap().preset.as_deref(), expected);
+        assert_eq!(
+            store.get("test").unwrap().env["MODEL"],
+            if policy == "skip" {
+                "old-model"
+            } else {
+                "new-model"
+            }
+        );
+        let (status, _) = call(
+            f.app.clone(),
+            json_req(
+                "PUT",
+                "/api/profiles/test",
+                json!({"env": {"MODEL": "env-edit"}}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(store.get("test").unwrap().preset.as_deref(), expected);
+    }
+    // Ordinary env edits preserve metadata; a rejected backup cannot change it.
+    for (method, path, body) in [
+        (
+            "PUT",
+            "/api/profiles/test",
+            json!({"env": {"MODEL": "edited"}}),
+        ),
+        (
+            "POST",
+            "/api/import",
+            json!({"version": 2, "policy": "overwrite", "profiles": [
+                {"name": "test", "preset": "moonshot", "env": {"INVALID KEY": "bad"}}
+            ]}),
+        ),
+    ] {
+        let (_, summary) = call(f.app.clone(), json_req(method, path, body)).await;
+        if method == "POST" {
+            assert_eq!(summary["errors"].as_array().unwrap().len(), 1);
+        }
+        assert_eq!(store.get("test").unwrap().preset, None);
+        assert_eq!(store.get("test").unwrap().env["MODEL"], "edited");
+    }
 }
 
 #[tokio::test]
