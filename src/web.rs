@@ -25,6 +25,9 @@ const SESSION_LIST_LIMIT: usize = 50;
 /// Confirmation header value required for plaintext secret export.
 const EXPORT_SECRETS_CONFIRM: &str = "export-secrets";
 
+/// Version 1 used ambiguous writable display strings and cannot be imported.
+const EXPORT_VERSION: u32 = 2;
+
 /// Launch hook: production spawns Terminal via osascript; tests capture.
 type Launcher = std::sync::Arc<dyn Fn(&str) -> std::io::Result<()> + Send + Sync>;
 
@@ -230,27 +233,21 @@ fn request_has_valid_token(req: &Request, expected: &str) -> bool {
         .is_some_and(|t| t == expected)
 }
 
-// ---------- DTOs (secrets always masked on the way out) ----------
+// ---------- DTOs (hidden values are never writable display strings) ----------
+
+type NullableEnv = BTreeMap<String, Option<String>>;
 
 #[derive(Serialize)]
-struct ProfileView {
-    name: String,
-    home: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    preset: Option<String>,
-    managed: bool,
-    env: BTreeMap<String, String>,
+struct EnvView {
+    env: NullableEnv,
+    env_display: BTreeMap<String, String>,
 }
 
-impl From<Profile> for ProfileView {
-    fn from(p: Profile) -> Self {
+impl From<BTreeMap<String, String>> for EnvView {
+    fn from(env: BTreeMap<String, String>) -> Self {
         Self {
-            name: p.name,
-            home: p.home.display().to_string(),
-            preset: p.preset,
-            managed: p.managed,
-            env: p
-                .env
+            env: env.keys().map(|k| (k.clone(), None)).collect(),
+            env_display: env
                 .into_iter()
                 .map(|(k, v)| {
                     let shown = if secret::is_marker(&v) {
@@ -261,6 +258,55 @@ impl From<Profile> for ProfileView {
                     (k, shown)
                 })
                 .collect(),
+        }
+    }
+}
+
+/// Null leaves a key unchanged; every string is a literal storage patch.
+fn writable_env(env: NullableEnv) -> BTreeMap<String, String> {
+    env.into_iter()
+        .filter_map(|(k, v)| v.map(|v| (k, v)))
+        .collect()
+}
+
+/// A redacted import cannot restore keys absent from the destination.
+fn import_env(
+    env: NullableEnv,
+    current: &BTreeMap<String, String>,
+) -> Result<BTreeMap<String, String>, ApiError> {
+    let missing: Vec<_> = env
+        .iter()
+        .filter(|(k, v)| v.is_none() && !current.contains_key(*k))
+        .map(|(k, _)| k.as_str())
+        .collect();
+    if !missing.is_empty() {
+        return Err(ApiError::bad_request(format!(
+            "redacted env cannot restore missing keys: {}; re-enter values or import a plaintext export",
+            missing.join(", ")
+        )));
+    }
+    Ok(writable_env(env))
+}
+
+#[derive(Serialize)]
+struct ProfileView {
+    name: String,
+    home: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    preset: Option<String>,
+    managed: bool,
+    #[serde(flatten)]
+    env: EnvView,
+}
+
+impl From<Profile> for ProfileView {
+    fn from(p: Profile) -> Self {
+        Self {
+            name: p.name,
+            home: p.home.display().to_string(),
+            preset: p.preset,
+            managed: p.managed,
+            env: EnvView::from(p.env),
         }
     }
 }
@@ -277,13 +323,13 @@ pub struct CreateProfile {
     #[serde(default)]
     preset: Option<String>,
     #[serde(default)]
-    env: BTreeMap<String, String>,
+    env: NullableEnv,
 }
 
 #[derive(Deserialize)]
 pub struct EnvPatch {
     #[serde(default)]
-    env: BTreeMap<String, String>,
+    env: NullableEnv,
 }
 
 #[derive(Deserialize)]
@@ -331,9 +377,11 @@ fn default_usage_days() -> u64 {
 
 #[derive(Deserialize)]
 pub struct ImportRequest {
+    #[serde(default)]
+    version: Option<u32>,
     profiles: Vec<ImportProfile>,
     #[serde(default)]
-    shared: Option<BTreeMap<String, String>>,
+    shared: Option<NullableEnv>,
     /// "skip" (default) or "overwrite" for existing profiles.
     #[serde(default)]
     policy: Option<String>,
@@ -345,7 +393,7 @@ pub struct ImportProfile {
     #[serde(default)]
     preset: Option<String>,
     #[serde(default)]
-    env: BTreeMap<String, String>,
+    env: NullableEnv,
 }
 
 #[derive(Default, Serialize)]
@@ -396,7 +444,9 @@ async fn create_profile(
             return Err(ApiError::bad_request(format!("unknown preset {key:?}")));
         }
     }
-    let profile = state.store.create(&body.name, body.preset, body.env)?;
+    let profile = state
+        .store
+        .create(&body.name, body.preset, writable_env(body.env))?;
     Ok((StatusCode::CREATED, Json(ProfileView::from(profile))))
 }
 
@@ -413,7 +463,7 @@ async fn update_profile(
     Path(name): Path<String>,
     Json(body): Json<EnvPatch>,
 ) -> Result<Json<ProfileView>, ApiError> {
-    let profile = state.store.update_env(&name, body.env)?;
+    let profile = state.store.update_env(&name, writable_env(body.env))?;
     Ok(Json(ProfileView::from(profile)))
 }
 
@@ -523,16 +573,15 @@ fn build_export(state: &AppState, include_secrets: bool) -> Result<serde_json::V
     let (profiles, _) = state.store.list()?;
     let mut out_profiles = Vec::new();
     for p in profiles {
-        let env = if include_secrets {
-            state.store.resolve_env(&p.name)?
-        } else {
-            p.env
+        let env: NullableEnv = if include_secrets {
+            state
+                .store
+                .resolve_env(&p.name)?
                 .into_iter()
-                .map(|(k, v)| {
-                    let value = if secret::is_marker(&v) { v } else { mask(&v) };
-                    (k, value)
-                })
+                .map(|(k, v)| (k, Some(v)))
                 .collect()
+        } else {
+            p.env.into_keys().map(|k| (k, None)).collect()
         };
         out_profiles.push(serde_json::json!({
             "name": p.name,
@@ -540,27 +589,29 @@ fn build_export(state: &AppState, include_secrets: bool) -> Result<serde_json::V
             "env": env,
         }));
     }
-    let shared = if include_secrets {
-        state.store.resolve_shared()?
+    let shared: NullableEnv = if include_secrets {
+        state
+            .store
+            .resolve_shared()?
+            .into_iter()
+            .map(|(k, v)| (k, Some(v)))
+            .collect()
     } else {
         state
             .store
             .read_shared()?
-            .into_iter()
-            .map(|(k, v)| {
-                let value = if secret::is_marker(&v) { v } else { mask(&v) };
-                (k, value)
-            })
+            .into_keys()
+            .map(|k| (k, None))
             .collect()
     };
     Ok(serde_json::json!({
-        "version": 1,
+        "version": EXPORT_VERSION,
         "profiles": out_profiles,
         "shared": shared,
         "warning": if include_secrets {
-            "this file contains plaintext tokens — store it accordingly"
+            "this file contains plaintext env values, including credentials — store it accordingly"
         } else {
-            "env values are masked or keychain references; matching existing values are preserved on import, but missing or changed values must be re-entered"
+            "env values are redacted as null; import preserves current values, cannot restore prior values, and reports missing keys as errors; re-enter missing values or use a confirmed plaintext export"
         },
     }))
 }
@@ -590,6 +641,11 @@ async fn import_profiles(
     State(state): State<AppState>,
     Json(body): Json<ImportRequest>,
 ) -> Result<Json<ImportSummary>, ApiError> {
+    if body.version != Some(EXPORT_VERSION) {
+        return Err(ApiError::bad_request(format!(
+            "unsupported import version; expected {EXPORT_VERSION} (older formats contain ambiguous display strings)"
+        )));
+    }
     let mut summary = ImportSummary::default();
     let overwrite = match body.policy.as_deref() {
         None | Some("skip") => false,
@@ -602,16 +658,42 @@ async fn import_profiles(
     };
     for p in body.profiles {
         let name = p.name.as_str();
-        let exists = state.store.get(name).map(|pr| pr.managed).unwrap_or(false)
-            || name == crate::paths::DEFAULT_PROFILE;
-        let result = if exists && !overwrite {
+        let current = if overwrite && p.env.values().any(Option::is_none) {
+            state.store.resolve_env(name)
+        } else {
+            state.store.get(name).map(|pr| pr.env)
+        };
+        let current = match current {
+            Ok(env) => Some(env),
+            Err(StoreError::NotFound(_)) => None,
+            Err(e) => {
+                summary.errors.push(ImportError {
+                    name: name.into(),
+                    error: e.to_string(),
+                });
+                continue;
+            }
+        };
+        let exists = current.is_some() || name == crate::paths::DEFAULT_PROFILE;
+        if exists && !overwrite {
             summary.skipped.push(name.into());
             continue;
-        } else if exists || state.store.import(name).is_ok() {
+        }
+        let env = match import_env(p.env, &current.unwrap_or_default()) {
+            Ok(env) => env,
+            Err(e) => {
+                summary.errors.push(ImportError {
+                    name: name.into(),
+                    error: e.message,
+                });
+                continue;
+            }
+        };
+        let result = if exists || state.store.import(name).is_ok() {
             // Existing profile, or an unmanaged dir we can adopt on the fly.
-            state.store.update_env(name, p.env)
+            state.store.update_env(name, env)
         } else {
-            state.store.create(name, p.preset.clone(), p.env)
+            state.store.create(name, p.preset.clone(), env)
         };
         match result {
             Ok(_) if exists => summary.updated.push(name.into()),
@@ -623,34 +705,32 @@ async fn import_profiles(
         }
     }
     if let Some(shared) = body.shared {
-        state.store.write_shared(shared)?;
+        let current = if shared.values().any(Option::is_none) {
+            state.store.resolve_shared()?
+        } else {
+            state.store.read_shared()?
+        };
+        match import_env(shared, &current) {
+            Ok(env) => state.store.write_shared(env)?,
+            Err(e) => summary.errors.push(ImportError {
+                name: "_shared".into(),
+                error: e.message,
+            }),
+        }
     }
     Ok(Json(summary))
 }
 
-async fn get_shared(
-    State(state): State<AppState>,
-) -> Result<Json<BTreeMap<String, String>>, ApiError> {
+async fn get_shared(State(state): State<AppState>) -> Result<Json<EnvView>, ApiError> {
     let env = state.store.read_shared()?;
-    Ok(Json(
-        env.into_iter()
-            .map(|(k, v)| {
-                let shown = if secret::is_marker(&v) {
-                    "🔑 keychain".to_string()
-                } else {
-                    mask(&v)
-                };
-                (k, shown)
-            })
-            .collect(),
-    ))
+    Ok(Json(EnvView::from(env)))
 }
 
 async fn put_shared(
     State(state): State<AppState>,
     Json(body): Json<EnvPatch>,
 ) -> Result<StatusCode, ApiError> {
-    state.store.write_shared(body.env)?;
+    state.store.write_shared(writable_env(body.env))?;
     Ok(StatusCode::NO_CONTENT)
 }
 

@@ -187,7 +187,7 @@ impl ProfileStore {
             return Err(StoreError::HomeExists(home));
         }
         validate_env_keys(env.keys())?;
-        let env = self.protect_secrets(name, env, &BTreeMap::new())?;
+        let env = self.protect_secrets(name, env)?;
         fs::create_dir_all(&home)?;
         self.apply_templates(&home);
         self.copy_mcp_servers(&home);
@@ -223,7 +223,6 @@ impl ProfileStore {
     }
 
     /// Merge env updates. An empty value deletes the key.
-    /// Values matching the current display are ignored when round-tripped.
     /// Secret values are diverted to the keychain; the file keeps a marker.
     pub fn update_env(
         &self,
@@ -233,7 +232,7 @@ impl ProfileStore {
         validate_name(name)?;
         validate_env_keys(patch.keys())?;
         let mut file = self.read_profile_file(name).unwrap_or_default();
-        let patch = self.protect_secrets(name, patch, &file.env)?;
+        let patch = self.protect_secrets(name, patch)?;
         for (k, v) in patch {
             if v.is_empty() {
                 file.env.remove(&k);
@@ -292,21 +291,7 @@ impl ProfileStore {
         &self,
         name: &str,
         mut env: BTreeMap<String, String>,
-        current: &BTreeMap<String, String>,
     ) -> Result<BTreeMap<String, String>, StoreError> {
-        // Only the display of this key's stored value is a read-back placeholder.
-        // New values remain valid even if they happen to look like a mask.
-        env.retain(|k, v| {
-            current.get(k).is_none_or(|stored| {
-                v == stored
-                    || *v
-                        != if secret::is_marker(stored) {
-                            "🔑 keychain".to_string()
-                        } else {
-                            mask(stored)
-                        }
-            })
-        });
         for (k, v) in env.iter_mut() {
             if secret::is_secret_key(k) && !v.is_empty() && !secret::is_marker(v) {
                 self.secrets.set(name, k, v).map_err(StoreError::Io)?;
@@ -359,7 +344,7 @@ impl ProfileStore {
     pub fn write_shared(&self, patch: BTreeMap<String, String>) -> Result<(), StoreError> {
         validate_env_keys(patch.keys())?;
         let mut env = self.read_shared()?;
-        let patch = self.protect_secrets(SHARED_SLOT, patch, &env)?;
+        let patch = self.protect_secrets(SHARED_SLOT, patch)?;
         for (k, v) in patch {
             if v.is_empty() {
                 env.remove(&k);

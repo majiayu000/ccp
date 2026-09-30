@@ -155,19 +155,19 @@ Server config (`config.toml`): `port = 9847` default, overridable by
 | GET | `/api/profiles` | List managed profiles + unmanaged `~/.claude-*` dirs found |
 | POST | `/api/profiles` | Create profile `{name, preset?, env: {K: V}}` — writes profile TOML (0600), creates `~/.claude-<name>/`, applies template symlinks |
 | POST | `/api/profiles/import` | Adopt an unmanaged `~/.claude-<name>` dir `{name}` |
-| PUT | `/api/profiles/{name}` | Update env vars (merge; values matching the current display preserve the stored value; empty value deletes key) |
+| PUT | `/api/profiles/{name}` | Update env vars (merge; `null` or omitted values leave keys unchanged; strings are literal values; empty string deletes key) |
 | DELETE | `/api/profiles/{name}` | Unmanage profile (requires `?confirm=true`; the `~/.claude-<name>` dir is kept unless `?purge=true`; `default` cannot be deleted) |
-| GET/PUT | `/api/shared` | Read/update the shared env overlay (values masked on read; values matching the current display preserve the stored value on write) |
+| GET/PUT | `/api/shared` | Read/update the shared env overlay (`{env, env_display}` on read; `env` contains nulls, `env_display` contains masked text; writes use the same nullable env patch as profiles) |
 | GET | `/api/profiles/{name}/sessions` | Scan `home/projects/**/*.jsonl`, return recent sessions (id, cwd, first user message preview, mtime) |
 | POST | `/api/profiles/{name}/launch` | Body `{resume?: sessionId, cwd?: string}` → spawn Terminal window with env + `claude [--resume id]` |
 | POST | `/api/profiles/{name}/test` | M3: connectivity check — timed request to the profile's base URL with its token; returns latency + auth ok/fail |
-| GET | `/api/export` | JSON export with all env values masked or kept as `@keychain` references (`Cache-Control: no-store`). Import preserves matching existing values; missing or changed values must be re-entered. `?include_secrets=true` is rejected. |
+| GET | `/api/export` | Version 2 JSON export with all env values redacted as `null` (`Cache-Control: no-store`). Import preserves current values, cannot restore prior values, and reports missing keys as errors. `?include_secrets=true` is rejected. |
 | POST | `/api/export` | Body `{include_secrets?: bool}`. Plaintext secrets require header `X-Ccp-Confirm: export-secrets`. |
-| POST | `/api/import` | Import with conflict policy `skip\|overwrite` |
+| POST | `/api/import` | Import version 2 with conflict policy `skip\|overwrite`. Missing/unsupported versions fail before mutation. A missing redacted key rejects that profile/shared patch and appears in `errors` |
 
 All `/api/*` routes require `Authorization: Bearer <token>` (or `X-Ccp-Token`), where the token is persisted at `~/.ccp/api_token` (0600) and injected into the GUI HTML. Requests with a non-loopback `Host` or a cross-origin `Origin` are rejected with 403. The server never sends `Access-Control-Allow-Private-Network`.
 
-Token values are never returned by GET APIs (only key names + masked value). Plaintext tokens are only available via authenticated POST `/api/export` with an explicit confirmation header.
+Profile responses expose `env` with null values and a separate `env_display` map for masked UI text. The UI uses display text only for labels and placeholders. Redacted imports fail when an existing Keychain entry is missing; a plaintext import can restore it. Token values are never returned by GET APIs. Plaintext tokens are only available via authenticated POST `/api/export` with an explicit confirmation header.
 
 ## Launch mechanism (macOS)
 
