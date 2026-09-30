@@ -38,7 +38,12 @@ always resumes with the same source it started on.
 
 ## Install
 
+Requires Rust, macOS (for Keychain and terminal launching), and Claude Code on
+your `PATH`. See [Contributing](CONTRIBUTING.md) for the development setup.
+
 ```sh
+git clone https://github.com/majiayu000/ccp.git
+cd ccp
 cargo install --path .
 ccp serve          # then open http://127.0.0.1:9847
 ```
