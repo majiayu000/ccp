@@ -155,13 +155,13 @@ Server config (`config.toml`): `port = 9847` default, overridable by
 | GET | `/api/profiles` | List managed profiles + unmanaged `~/.claude-*` dirs found |
 | POST | `/api/profiles` | Create profile `{name, preset?, env: {K: V}}` — writes profile TOML (0600), creates `~/.claude-<name>/`, applies template symlinks |
 | POST | `/api/profiles/import` | Adopt an unmanaged `~/.claude-<name>` dir `{name}` |
-| PUT | `/api/profiles/{name}` | Update env vars (merge; empty value deletes key) |
+| PUT | `/api/profiles/{name}` | Update env vars (merge; display placeholders ignored; empty value deletes key) |
 | DELETE | `/api/profiles/{name}` | Unmanage profile (requires `?confirm=true`; the `~/.claude-<name>` dir is kept unless `?purge=true`; `default` cannot be deleted) |
-| GET/PUT | `/api/shared` | Read/update the shared env overlay (values masked on read) |
+| GET/PUT | `/api/shared` | Read/update the shared env overlay (values masked on read; display placeholders ignored on write) |
 | GET | `/api/profiles/{name}/sessions` | Scan `home/projects/**/*.jsonl`, return recent sessions (id, cwd, first user message preview, mtime) |
 | POST | `/api/profiles/{name}/launch` | Body `{resume?: sessionId, cwd?: string}` → spawn Terminal window with env + `claude [--resume id]` |
 | POST | `/api/profiles/{name}/test` | M3: connectivity check — timed request to the profile's base URL with its token; returns latency + auth ok/fail |
-| GET | `/api/export` | Masked JSON export only (`Cache-Control: no-store`). `?include_secrets=true` is rejected. |
+| GET | `/api/export` | JSON export with intact non-secret env and `@keychain` token references (`Cache-Control: no-store`). Import preserves existing tokens; missing tokens must be re-entered. `?include_secrets=true` is rejected. |
 | POST | `/api/export` | Body `{include_secrets?: bool}`. Plaintext secrets require header `X-Ccp-Confirm: export-secrets`. |
 | POST | `/api/import` | Import with conflict policy `skip\|overwrite` |
 

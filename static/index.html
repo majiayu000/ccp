@@ -525,7 +525,7 @@ async function importAll(names) {
 /* ---------- export / import ---------- */
 async function doExport() {
   const withSecrets = confirm(
-    "导出全部 profile 配置?\n\n「确定」= 包含 token 明文(文件请妥善保管)\n「取消」= token 脱敏(导入后需重新填写 token)");
+    "导出全部 profile 配置?\n\n「确定」= 包含 token 明文(文件请妥善保管)\n「取消」= 保留 Keychain 引用(已有 token 不变,缺少的需重新填写)");
   try {
     const data = withSecrets
       ? await api("/api/export", {

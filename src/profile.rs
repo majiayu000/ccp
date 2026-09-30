@@ -223,6 +223,7 @@ impl ProfileStore {
     }
 
     /// Merge env updates. An empty value deletes the key.
+    /// Display placeholders are ignored so read responses can be round-tripped.
     /// Secret values are diverted to the keychain; the file keeps a marker.
     pub fn update_env(
         &self,
@@ -232,15 +233,13 @@ impl ProfileStore {
         validate_name(name)?;
         validate_env_keys(patch.keys())?;
         let mut file = self.read_profile_file(name).unwrap_or_default();
+        let patch = self.protect_secrets(name, patch)?;
         for (k, v) in patch {
             if v.is_empty() {
                 file.env.remove(&k);
                 if secret::is_secret_key(&k) {
                     let _ = self.secrets.delete(name, &k);
                 }
-            } else if secret::is_secret_key(&k) && !secret::is_marker(&v) {
-                self.secrets.set(name, &k, &v).map_err(StoreError::Io)?;
-                file.env.insert(k, secret::MARKER.into());
             } else {
                 file.env.insert(k, v);
             }
@@ -294,6 +293,7 @@ impl ProfileStore {
         name: &str,
         mut env: BTreeMap<String, String>,
     ) -> Result<BTreeMap<String, String>, StoreError> {
+        env.retain(|_, v| !is_display_placeholder(v));
         for (k, v) in env.iter_mut() {
             if secret::is_secret_key(k) && !v.is_empty() && !secret::is_marker(v) {
                 self.secrets.set(name, k, v).map_err(StoreError::Io)?;
@@ -497,6 +497,13 @@ fn write_private(path: &std::path::Path, body: &[u8]) -> Result<(), StoreError> 
         fs::set_permissions(path, fs::Permissions::from_mode(ENV_FILE_MODE))?;
     }
     Ok(())
+}
+
+/// Recognize only the keychain label and the exact forms produced by `mask`.
+fn is_display_placeholder(value: &str) -> bool {
+    value == "🔑 keychain"
+        || value == "•••"
+        || (value.chars().count() == 9 && value.chars().nth(4) == Some('…'))
 }
 
 /// Mask a secret for display: keep tiny affordances, never the substance.

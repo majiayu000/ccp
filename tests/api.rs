@@ -512,7 +512,7 @@ async fn export_masks_and_import_respects_policy() {
         .clone();
     assert_eq!(
         kimi["env"]["ANTHROPIC_AUTH_TOKEN"].as_str().unwrap(),
-        "🔑 keychain"
+        "@keychain"
     );
 
     // GET ?include_secrets=true is rejected (not cacheable plaintext).
@@ -605,6 +605,156 @@ async fn export_masks_and_import_respects_policy() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+fn roundtrip_fixture() -> Fixture {
+    let f = fixture();
+    let store = ccp::profile::ProfileStore::with_secrets(
+        Paths::new(&f.user_home, &f.ccp_home),
+        f.secrets.clone(),
+    );
+    let env = std::collections::BTreeMap::from([
+        (
+            "ANTHROPIC_AUTH_TOKEN".into(),
+            "test-profile-token-123456".into(),
+        ),
+        (
+            "ANTHROPIC_BASE_URL".into(),
+            "https://example.test/anthropic".into(),
+        ),
+        ("ANTHROPIC_MODEL".into(), "test-model".into()),
+        (
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".into(),
+            "1".into(),
+        ),
+    ]);
+    store.create("test", None, env.clone()).unwrap();
+    store.write_shared(env).unwrap();
+    f
+}
+
+fn assert_roundtrip_values_unchanged(f: &Fixture, profile: &str, shared: &str) {
+    for owner in ["test", "_shared"] {
+        assert_eq!(
+            f.secrets
+                .get(owner, "ANTHROPIC_AUTH_TOKEN")
+                .unwrap()
+                .as_deref(),
+            Some("test-profile-token-123456"),
+            "token for {owner} changed"
+        );
+    }
+    assert_eq!(
+        std::fs::read_to_string(f.ccp_home.join("profiles/test.toml")).unwrap(),
+        profile
+    );
+    assert_eq!(
+        std::fs::read_to_string(f.ccp_home.join("shared.toml")).unwrap(),
+        shared
+    );
+}
+
+#[tokio::test]
+async fn masked_export_import_preserves_env_and_tokens() {
+    let f = roundtrip_fixture();
+    let profile = std::fs::read_to_string(f.ccp_home.join("profiles/test.toml")).unwrap();
+    let shared = std::fs::read_to_string(f.ccp_home.join("shared.toml")).unwrap();
+    let (status, mut export) = call(f.app.clone(), get0("/api/export")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(!export.to_string().contains("test-profile-token-123456"));
+    export["policy"] = json!("overwrite");
+    let (status, summary) = call(
+        f.app.clone(),
+        json_req("POST", "/api/import", export.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{summary}");
+    assert_eq!(summary["errors"], json!([]));
+    assert_roundtrip_values_unchanged(&f, &profile, &shared);
+    let env = &export["profiles"][1]["env"];
+    assert_eq!(env["ANTHROPIC_AUTH_TOKEN"], "@keychain");
+    assert_eq!(env["ANTHROPIC_BASE_URL"], "https://example.test/anthropic");
+    assert_eq!(env["ANTHROPIC_MODEL"], "test-model");
+    assert_eq!(env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"], "1");
+    assert_eq!(export["shared"], *env);
+}
+
+#[tokio::test]
+async fn displayed_env_roundtrip_preserves_env_and_tokens() {
+    let f = roundtrip_fixture();
+    let profile = std::fs::read_to_string(f.ccp_home.join("profiles/test.toml")).unwrap();
+    let shared = std::fs::read_to_string(f.ccp_home.join("shared.toml")).unwrap();
+    let (status, profiles) = call(f.app.clone(), get0("/api/profiles")).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        f.app.clone(),
+        json_req(
+            "PUT",
+            "/api/profiles/test",
+            json!({"env": profiles["profiles"][1]["env"]}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, env) = call(f.app.clone(), get0("/api/shared")).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        f.app.clone(),
+        json_req("PUT", "/api/shared", json!({"env": env})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_roundtrip_values_unchanged(&f, &profile, &shared);
+}
+
+#[tokio::test]
+async fn display_placeholders_are_not_saved_on_create() {
+    let f = fixture();
+    let (status, _) = call(
+        f.app.clone(),
+        json_req(
+            "POST",
+            "/api/profiles",
+            json!({
+                "name": "test", "env": {
+                    "ANTHROPIC_AUTH_TOKEN": "🔑 keychain",
+                    "ANTHROPIC_API_KEY": "sk-a…5678",
+                    "ANTHROPIC_BASE_URL": "http…opic",
+                    "FLAG": "•••"
+                }
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let raw = std::fs::read_to_string(f.ccp_home.join("profiles/test.toml")).unwrap();
+    let stored: toml::Value = toml::from_str(&raw).unwrap();
+    assert!(stored["env"].as_table().unwrap().is_empty());
+    for key in ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"] {
+        assert_eq!(f.secrets.get("test", key).unwrap(), None);
+    }
+
+    // Explicit replacements and empty-value deletion still work for secrets.
+    for value in ["test-explicit-token", ""] {
+        let (status, _) = call(
+            f.app.clone(),
+            json_req(
+                "PUT",
+                "/api/profiles/test",
+                json!({"env": {"ANTHROPIC_API_KEY": value}}),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            f.secrets.get("test", "ANTHROPIC_API_KEY").unwrap(),
+            if value.is_empty() {
+                None
+            } else {
+                Some(value.into())
+            }
+        );
+    }
 }
 
 #[test]
