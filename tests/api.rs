@@ -490,6 +490,231 @@ async fn test_endpoint_rejects_ssrf_and_untrusted_credential_hosts() {
 }
 
 #[tokio::test]
+async fn backup_import_invalid_env_keeps_directory_unmanaged_and_retryable() {
+    let f = fixture();
+    let home = f.user_home.join(".claude-kimi");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(home.join("existing.txt"), "keep me").unwrap();
+
+    let (status, body) = call(
+        f.app.clone(),
+        json_req(
+            "POST",
+            "/api/import",
+            json!({"version": 2, "profiles": [{"name": "kimi", "preset": "moonshot",
+                "env": {"BAD KEY": "invalid", "ANTHROPIC_AUTH_TOKEN": "test-import-token"}}]}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["created"].as_array().unwrap().is_empty(), "{body}");
+    assert_eq!(body["errors"][0]["name"], "kimi");
+    assert!(body["errors"][0]["error"]
+        .as_str()
+        .unwrap()
+        .contains("invalid env key"));
+    assert!(!f.ccp_home.join("profiles/kimi.toml").exists());
+    assert_eq!(f.secrets.get("kimi", "ANTHROPIC_AUTH_TOKEN").unwrap(), None);
+    let (_, list) = call(f.app.clone(), get0("/api/profiles")).await;
+    assert_eq!(list["unmanaged"][0]["name"], "kimi");
+
+    let (status, body) = call(
+        f.app.clone(),
+        json_req(
+            "POST",
+            "/api/import",
+            json!({"version": 2, "policy": "skip", "profiles": [{"name": "kimi",
+                "preset": "moonshot", "env": {"ANTHROPIC_MODEL": "test-model"}}]}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["created"], json!(["kimi"]));
+    assert!(body["errors"].as_array().unwrap().is_empty(), "{body}");
+    let raw = std::fs::read_to_string(f.ccp_home.join("profiles/kimi.toml")).unwrap();
+    let saved: Value = toml::from_str(&raw).unwrap();
+    assert_eq!(saved["preset"], "moonshot");
+    assert_eq!(saved["env"]["ANTHROPIC_MODEL"], "test-model");
+    assert_eq!(
+        std::fs::read_to_string(home.join("existing.txt")).unwrap(),
+        "keep me"
+    );
+}
+
+#[tokio::test]
+async fn backup_import_keeps_preset_env_and_existing_home_contents() {
+    let f = fixture();
+    let home = f.user_home.join(".claude-kimi");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(home.join("existing.txt"), "keep me").unwrap();
+    std::fs::write(f.user_home.join(".claude/CLAUDE.md"), "template").unwrap();
+    let (status, body) = call(
+        f.app.clone(),
+        json_req(
+            "POST",
+            "/api/import",
+            json!({"version": 2, "profiles": [{"name": "kimi", "preset": "moonshot",
+                "env": {"ANTHROPIC_MODEL": "test-model", "ANTHROPIC_AUTH_TOKEN": "test-import-token",
+                    "EMPTY": ""}}]}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["created"], json!(["kimi"]));
+    assert!(body["errors"].as_array().unwrap().is_empty(), "{body}");
+    let raw = std::fs::read_to_string(f.ccp_home.join("profiles/kimi.toml")).unwrap();
+    let saved: Value = toml::from_str(&raw).unwrap();
+    assert_eq!(saved["preset"], "moonshot");
+    assert_eq!(saved["env"]["ANTHROPIC_MODEL"], "test-model");
+    assert_eq!(saved["env"]["ANTHROPIC_AUTH_TOKEN"], "@keychain");
+    assert!(saved["env"].get("EMPTY").is_none());
+    assert!(!raw.contains("test-import-token"));
+    assert_eq!(
+        f.secrets
+            .get("kimi", "ANTHROPIC_AUTH_TOKEN")
+            .unwrap()
+            .as_deref(),
+        Some("test-import-token")
+    );
+    assert_eq!(
+        std::fs::read_to_string(home.join("existing.txt")).unwrap(),
+        "keep me"
+    );
+    assert!(!home.join("CLAUDE.md").exists());
+}
+
+#[tokio::test]
+async fn backup_import_rejects_unknown_preset_without_adoption_or_creation() {
+    let f = fixture();
+    std::fs::create_dir_all(f.user_home.join(".claude-kimi")).unwrap();
+    let (status, body) = call(
+        f.app.clone(),
+        json_req(
+            "POST",
+            "/api/import",
+            json!({"version": 2, "profiles": [
+                {"name": "kimi", "preset": "unknown", "env": {"ANTHROPIC_AUTH_TOKEN": "test-import-token"}},
+                {"name": "fresh", "preset": "unknown", "env": {}}
+            ]}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["created"].as_array().unwrap().is_empty(), "{body}");
+    assert_eq!(body["errors"].as_array().unwrap().len(), 2, "{body}");
+    for error in body["errors"].as_array().unwrap() {
+        assert!(error["error"].as_str().unwrap().contains("unknown preset"));
+    }
+    assert!(!f.ccp_home.join("profiles/kimi.toml").exists());
+    assert!(!f.ccp_home.join("profiles/fresh.toml").exists());
+    assert!(!f.user_home.join(".claude-fresh").exists());
+    assert_eq!(f.secrets.get("kimi", "ANTHROPIC_AUTH_TOKEN").unwrap(), None);
+}
+
+#[tokio::test]
+async fn backup_import_keychain_failure_does_not_adopt_directory() {
+    struct FailingSecrets(std::sync::Arc<ccp::secret::MemoryStore>);
+    impl SecretStore for FailingSecrets {
+        fn get(&self, profile: &str, key: &str) -> std::io::Result<Option<String>> {
+            self.0.get(profile, key)
+        }
+        fn set(&self, profile: &str, key: &str, value: &str) -> std::io::Result<()> {
+            if key == "ANTHROPIC_AUTH_TOKEN" {
+                Err(std::io::Error::other("test keychain unavailable"))
+            } else {
+                self.0.set(profile, key, value)
+            }
+        }
+        fn delete(&self, profile: &str, key: &str) -> std::io::Result<()> {
+            self.0.delete(profile, key)
+        }
+    }
+    let f = fixture();
+    std::fs::create_dir_all(f.user_home.join(".claude-kimi")).unwrap();
+    f.secrets
+        .set("kimi", "ANTHROPIC_API_KEY", "test-existing-key")
+        .unwrap();
+    let app = router(AppState::with_parts(
+        Paths::new(&f.user_home, &f.ccp_home),
+        std::sync::Arc::new(FailingSecrets(f.secrets.clone())),
+        |_cmd| Ok(()),
+        TEST_TOKEN,
+        TEST_PORT,
+    ));
+    let (status, body) = call(
+        app,
+        json_req(
+            "POST",
+            "/api/import",
+            json!({"version": 2, "profiles": [{"name": "kimi",
+                "preset": "moonshot", "env": {"ANTHROPIC_API_KEY": "test-new-key", "ANTHROPIC_AUTH_TOKEN": "test-import-token"}}]}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["created"].as_array().unwrap().is_empty(), "{body}");
+    assert!(
+        body["errors"][0]["error"]
+            .as_str()
+            .unwrap()
+            .contains("test keychain unavailable"),
+        "{body}"
+    );
+    assert!(!f.ccp_home.join("profiles/kimi.toml").exists());
+    assert!(f.user_home.join(".claude-kimi").is_dir());
+    assert_eq!(
+        f.secrets
+            .get("kimi", "ANTHROPIC_API_KEY")
+            .unwrap()
+            .as_deref(),
+        Some("test-existing-key")
+    );
+    assert_eq!(f.secrets.get("kimi", "ANTHROPIC_AUTH_TOKEN").unwrap(), None);
+}
+
+#[tokio::test]
+async fn backup_import_reports_adoption_write_error_without_create_fallback() {
+    let f = fixture();
+    std::fs::create_dir_all(f.user_home.join(".claude-kimi")).unwrap();
+    std::fs::write(&f.ccp_home, "block profile writes").unwrap();
+    f.secrets
+        .set("kimi", "ANTHROPIC_AUTH_TOKEN", "test-existing-token")
+        .unwrap();
+    let (status, body) = call(
+        f.app,
+        json_req(
+            "POST",
+            "/api/import",
+            json!({"version": 2, "profiles": [{"name": "kimi",
+                "preset": "moonshot", "env": {"ANTHROPIC_MODEL": "test-model", "ANTHROPIC_AUTH_TOKEN": "test-import-token"}}]}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["created"].as_array().unwrap().is_empty(), "{body}");
+    assert!(
+        body["errors"][0]["error"]
+            .as_str()
+            .unwrap()
+            .contains("io error"),
+        "{body}"
+    );
+    assert!(!f.ccp_home.join("profiles/kimi.toml").exists());
+    assert_eq!(
+        std::fs::read_to_string(&f.ccp_home).unwrap(),
+        "block profile writes"
+    );
+    assert!(f.user_home.join(".claude-kimi").is_dir());
+    assert_eq!(
+        f.secrets
+            .get("kimi", "ANTHROPIC_AUTH_TOKEN")
+            .unwrap()
+            .as_deref(),
+        Some("test-existing-token")
+    );
+}
+
+#[tokio::test]
 async fn export_masks_and_import_respects_policy() {
     let f = fixture();
     call(

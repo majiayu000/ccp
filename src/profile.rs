@@ -203,7 +203,12 @@ impl ProfileStore {
     }
 
     /// Adopt an existing unmanaged `~/.claude-<name>` dir without touching it.
-    pub fn import(&self, name: &str) -> Result<Profile, StoreError> {
+    pub fn import(
+        &self,
+        name: &str,
+        preset: Option<String>,
+        mut env: BTreeMap<String, String>,
+    ) -> Result<Profile, StoreError> {
         validate_name(name)?;
         if name == DEFAULT_PROFILE {
             return Err(StoreError::Reserved(name.into()));
@@ -218,7 +223,57 @@ impl ProfileStore {
                 home.display()
             )));
         }
-        self.write_profile_file(name, &ProfileFile::default())?;
+        validate_env_keys(env.keys())?;
+        env.retain(|_, value| !value.is_empty());
+        let previous_secrets = env
+            .iter()
+            .filter(|(key, value)| secret::is_secret_key(key) && !secret::is_marker(value))
+            .map(|(key, _)| {
+                self.secrets
+                    .get(name, key)
+                    .map(|value| (key.clone(), value))
+                    .map_err(StoreError::Io)
+            })
+            .collect::<Result<BTreeMap<_, _>, _>>()?;
+        let result = self.protect_secrets(name, env).and_then(|env| {
+            self.write_profile_file(
+                name,
+                &ProfileFile {
+                    preset,
+                    home: None,
+                    env,
+                },
+            )
+        });
+        if let Err(error) = result {
+            let mut cleanup_errors = Vec::new();
+            for (key, previous) in previous_secrets {
+                let cleanup = match previous {
+                    Some(value) => self.secrets.set(name, &key, &value),
+                    None => self.secrets.delete(name, &key),
+                };
+                if let Err(cleanup) = cleanup {
+                    cleanup_errors
+                        .push(format!("restoring keychain entry {name}/{key}: {cleanup}"));
+                }
+            }
+            let path = self.paths.profile_file(name);
+            if path.exists() {
+                if let Err(cleanup) = fs::remove_file(&path) {
+                    cleanup_errors.push(format!(
+                        "removing failed import {}: {cleanup}",
+                        path.display()
+                    ));
+                }
+            }
+            if !cleanup_errors.is_empty() {
+                return Err(StoreError::Io(io::Error::other(format!(
+                    "{error}; {}",
+                    cleanup_errors.join("; ")
+                ))));
+            }
+            return Err(error);
+        }
         self.read_profile(name)
     }
 

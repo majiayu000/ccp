@@ -454,7 +454,7 @@ async fn import_profile(
     State(state): State<AppState>,
     Json(body): Json<NameOnly>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let profile = state.store.import(&body.name)?;
+    let profile = state.store.import(&body.name, None, BTreeMap::new())?;
     Ok((StatusCode::CREATED, Json(ProfileView::from(profile))))
 }
 
@@ -689,11 +689,22 @@ async fn import_profiles(
                 continue;
             }
         };
-        let result = if exists || state.store.import(name).is_ok() {
-            // Existing profile, or an unmanaged dir we can adopt on the fly.
+        if let Some(key) = &p.preset {
+            if presets::find(key).is_none() {
+                summary.errors.push(ImportError {
+                    name: name.into(),
+                    error: format!("unknown preset {key:?}"),
+                });
+                continue;
+            }
+        }
+        let result = if exists {
             state.store.update_env(name, env)
         } else {
-            state.store.create(name, p.preset.clone(), env)
+            match state.store.import(name, p.preset.clone(), env.clone()) {
+                Err(StoreError::NotFound(_)) => state.store.create(name, p.preset, env),
+                result => result,
+            }
         };
         match result {
             Ok(_) if exists => summary.updated.push(name.into()),
