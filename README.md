@@ -4,13 +4,12 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Run multiple Claude Code API providers side by side, each in its own isolated
-config home. Switching tools like cc-switch mutate the global
-`~/.claude/settings.json`, so every new or resumed session follows whichever
-provider was configured last. ccp never touches the global config: each
+config home. This workflow uses separate profile homes instead of changing a
+shared provider selection for all launches. ccp never touches the global config: each
 profile is a top-level directory (`~/.claude-kimi`, `~/.claude-deepseek`, …)
 used as `CLAUDE_CONFIG_DIR`, plus per-process env vars injected at launch.
-Sessions, logins, and history stay pinned to their provider — an old chat
-always resumes with the same source it started on.
+Sessions, logins, and history stay in the selected profile home. Resuming a chat
+uses that home and the profile's current launch settings; editing a profile's endpoint changes subsequent launches from that profile.
 
 ## Features
 
@@ -49,6 +48,25 @@ ccp serve          # then open http://127.0.0.1:9847
 ```
 
 Other commands: `ccp presets`, `ccp doctor`.
+
+## First workflow: two providers, two homes
+
+1. Start `ccp serve`, then create a named profile in the web GUI. Choose a preset or configure an Anthropic-compatible endpoint and its provider-required model variables. Save its token through the GUI; the profile file keeps only the Keychain reference.
+2. Use that profile's connectivity test, then launch it. The test probes `/v1/models`; it is not proof that chat, tools, or every model will work.
+3. Create a second profile with a different name and launch it separately. Each terminal gets its own `CLAUDE_CONFIG_DIR` and provider environment.
+4. To resume, open history on the original profile card and choose the conversation. ccp restores its recorded project directory and launches with that profile's current settings.
+
+Keep the built-in `default` profile for your existing `~/.claude` login. Shared skills and instruction symlinks are reusable context; they do not combine profile session histories.
+
+## Profile FAQ
+
+**Can I use this on Windows or Linux?** The documented workflow targets macOS Keychain and Terminal/iTerm launching. The presence of Rust code does not establish another platform's support. See [Contributing](CONTRIBUTING.md).
+
+**Why does a connection test pass but Claude Code fail?** The probe checks the endpoint's models route and authentication response. Confirm the provider supports the Anthropic API expected by Claude Code and that its model variables are valid; a generic OpenAI endpoint is not automatically compatible.
+
+**Does isolation freeze a provider forever?** No. Histories are separated by home, while launches use the profile's current configuration. Use separate profiles when you need separate endpoints rather than editing one profile to represent two providers.
+
+**Where do I start troubleshooting?** Run `ccp doctor` for CLI availability, file permissions, broken symlinks, and token-storage problems. Report reproducible failures in [Issues](https://github.com/majiayu000/ccp/issues), with the ccp/Claude Code versions and macOS architecture. Remove tokens and transcript content before sharing. Installation is from source; [Releases](https://github.com/majiayu000/ccp/releases) is the place to check any published artifacts, not a promise of prebuilt downloads.
 
 ## Configuration
 
