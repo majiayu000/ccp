@@ -328,7 +328,7 @@ function renderProfiles(profiles) {
     return;
   }
   el.innerHTML = profiles.map(p => {
-    const chips = Object.entries(p.env);
+    const chips = Object.entries(p.env_display);
     return `
     <div class="card" id="card-${esc(p.name)}">
       <div class="card-head">
@@ -525,7 +525,7 @@ async function importAll(names) {
 /* ---------- export / import ---------- */
 async function doExport() {
   const withSecrets = confirm(
-    "导出全部 profile 配置?\n\n「确定」= 包含 token 明文(文件请妥善保管)\n「取消」= token 脱敏(导入后需重新填写 token)");
+    "导出全部 profile 配置?\n\n「确定」= 包含 env 明文(文件请妥善保管)\n「取消」= 全部 env 脱敏(保留当前值,无法恢复旧值;缺少的变量会报错,需重新填写)");
   try {
     const data = withSecrets
       ? await api("/api/export", {
@@ -540,7 +540,7 @@ async function doExport() {
     a.download = `ccp-profiles-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(a.href);
-    toast(withSecrets ? "已导出(含明文 token)" : "已导出(token 已脱敏)", "ok");
+    toast(withSecrets ? "已导出(含明文 env)" : "已导出(env 已脱敏)", "ok");
   } catch (e) { toast(e.message, "err"); }
 }
 function pickImport() { document.getElementById("import-file").click(); }
@@ -557,7 +557,7 @@ async function doImportFile(ev) {
     const r = await api("/api/import", {
       method: "POST",
       body: JSON.stringify({
-        profiles: data.profiles, shared: data.shared,
+        version: data.version, profiles: data.profiles, shared: data.shared,
         policy: overwrite ? "overwrite" : "skip",
       }),
     });
@@ -565,7 +565,7 @@ async function doImportFile(ev) {
     if (r.created.length) parts.push(`新建 ${r.created.length}`);
     if (r.updated.length) parts.push(`更新 ${r.updated.length}`);
     if (r.skipped.length) parts.push(`跳过 ${r.skipped.length}`);
-    if (r.errors.length) parts.push(`失败 ${r.errors.length}`);
+    if (r.errors.length) parts.push(`失败 ${r.errors.length}\n` + r.errors.map(e => `${e.name}: ${e.error}`).join("\n"));
     toast(`导入完成:${parts.join("、") || "无变化"}`, r.errors.length ? "err" : "ok");
     await loadAll();
   } catch (e) { toast(e.message, "err"); }
@@ -635,8 +635,8 @@ async function openEditor(name) {
     const p = profiles.find(x => x.name === editing);
     if (!p) return;
     for (const [id, key] of STD_FIELDS)
-      if (p.env[key]) document.getElementById(id).placeholder = p.env[key] + "(留空不变)";
-    for (const [k, v] of Object.entries(p.env))
+      if (p.env_display[key]) document.getElementById(id).placeholder = p.env_display[key] + "(留空不变)";
+    for (const [k, v] of Object.entries(p.env_display))
       if (!STD_KEYS.has(k)) kvRow("kv-list", k, "", v).dataset.existing = "1";
   }
   document.getElementById("modal-backdrop").hidden = false;
@@ -670,7 +670,7 @@ async function openShared() {
   const shared = await api("/api/shared");
   const list = document.getElementById("shared-list");
   list.innerHTML = "";
-  for (const [k, v] of Object.entries(shared))
+  for (const [k, v] of Object.entries(shared.env_display))
     kvRow("shared-list", k, "", v).dataset.existing = "1";
   document.getElementById("shared-msg").textContent = "";
   document.getElementById("shared-backdrop").hidden = false;

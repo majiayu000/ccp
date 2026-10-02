@@ -30,7 +30,7 @@ uses that home and the profile's current launch settings; editing a profile's en
   transcripts (no proxy, no network)
 - **Connectivity test** — probes `{base}/v1/models` and reports latency +
   auth status
-- **Export / import** — JSON backup of all profiles (tokens masked by default)
+- **Export / import** — JSON export of all profiles (env redacted by default; confirmed plaintext export for restorable backups)
 - **Shared env overlay** — env vars applied to every profile at launch
 - **`ccp doctor`** — checks CLI presence, file permissions (0600), broken
   template symlinks, plaintext tokens, unmanaged dirs

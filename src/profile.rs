@@ -203,7 +203,12 @@ impl ProfileStore {
     }
 
     /// Adopt an existing unmanaged `~/.claude-<name>` dir without touching it.
-    pub fn import(&self, name: &str) -> Result<Profile, StoreError> {
+    pub fn import(
+        &self,
+        name: &str,
+        preset: Option<String>,
+        mut env: BTreeMap<String, String>,
+    ) -> Result<Profile, StoreError> {
         validate_name(name)?;
         if name == DEFAULT_PROFILE {
             return Err(StoreError::Reserved(name.into()));
@@ -218,7 +223,57 @@ impl ProfileStore {
                 home.display()
             )));
         }
-        self.write_profile_file(name, &ProfileFile::default())?;
+        validate_env_keys(env.keys())?;
+        env.retain(|_, value| !value.is_empty());
+        let previous_secrets = env
+            .iter()
+            .filter(|(key, _)| secret::is_secret_key(key))
+            .map(|(key, _)| {
+                self.secrets
+                    .get(name, key)
+                    .map(|value| (key.clone(), value))
+                    .map_err(StoreError::Io)
+            })
+            .collect::<Result<BTreeMap<_, _>, _>>()?;
+        let result = self.protect_secrets(name, env).and_then(|env| {
+            self.write_profile_file(
+                name,
+                &ProfileFile {
+                    preset,
+                    home: None,
+                    env,
+                },
+            )
+        });
+        if let Err(error) = result {
+            let mut cleanup_errors = Vec::new();
+            for (key, previous) in previous_secrets {
+                let cleanup = match previous {
+                    Some(value) => self.secrets.set(name, &key, &value),
+                    None => self.secrets.delete(name, &key),
+                };
+                if let Err(cleanup) = cleanup {
+                    cleanup_errors
+                        .push(format!("restoring keychain entry {name}/{key}: {cleanup}"));
+                }
+            }
+            let path = self.paths.profile_file(name);
+            if path.exists() {
+                if let Err(cleanup) = fs::remove_file(&path) {
+                    cleanup_errors.push(format!(
+                        "removing failed import {}: {cleanup}",
+                        path.display()
+                    ));
+                }
+            }
+            if !cleanup_errors.is_empty() {
+                return Err(StoreError::Io(io::Error::other(format!(
+                    "{error}; {}",
+                    cleanup_errors.join("; ")
+                ))));
+            }
+            return Err(error);
+        }
         self.read_profile(name)
     }
 
@@ -229,18 +284,30 @@ impl ProfileStore {
         name: &str,
         patch: BTreeMap<String, String>,
     ) -> Result<Profile, StoreError> {
+        self.update_profile(name, None, patch)
+    }
+
+    /// Update env and optionally restore preset metadata in the same file write.
+    /// `None` preserves the preset; `Some(None)` clears it.
+    pub fn update_profile(
+        &self,
+        name: &str,
+        preset: Option<Option<String>>,
+        patch: BTreeMap<String, String>,
+    ) -> Result<Profile, StoreError> {
         validate_name(name)?;
         validate_env_keys(patch.keys())?;
         let mut file = self.read_profile_file(name).unwrap_or_default();
+        if let Some(preset) = preset {
+            file.preset = preset;
+        }
+        let patch = self.protect_secrets(name, patch)?;
         for (k, v) in patch {
             if v.is_empty() {
                 file.env.remove(&k);
                 if secret::is_secret_key(&k) {
                     let _ = self.secrets.delete(name, &k);
                 }
-            } else if secret::is_secret_key(&k) && !secret::is_marker(&v) {
-                self.secrets.set(name, &k, &v).map_err(StoreError::Io)?;
-                file.env.insert(k, secret::MARKER.into());
             } else {
                 file.env.insert(k, v);
             }
@@ -269,7 +336,7 @@ impl ProfileStore {
     ) -> Result<BTreeMap<String, String>, StoreError> {
         let mut out = BTreeMap::new();
         for (k, v) in env {
-            if secret::is_marker(&v) {
+            if secret::is_secret_key(&k) && secret::is_marker(&v) {
                 let real = self
                     .secrets
                     .get(owner, &k)
@@ -295,7 +362,7 @@ impl ProfileStore {
         mut env: BTreeMap<String, String>,
     ) -> Result<BTreeMap<String, String>, StoreError> {
         for (k, v) in env.iter_mut() {
-            if secret::is_secret_key(k) && !v.is_empty() && !secret::is_marker(v) {
+            if secret::is_secret_key(k) && !v.is_empty() {
                 self.secrets.set(name, k, v).map_err(StoreError::Io)?;
                 *v = secret::MARKER.into();
             }
@@ -317,7 +384,7 @@ impl ProfileStore {
         }
         if let Ok(profile) = self.read_profile(name) {
             for (k, v) in &profile.env {
-                if secret::is_marker(v) {
+                if secret::is_secret_key(k) && secret::is_marker(v) {
                     let _ = self.secrets.delete(name, k);
                 }
             }
@@ -345,8 +412,8 @@ impl ProfileStore {
 
     pub fn write_shared(&self, patch: BTreeMap<String, String>) -> Result<(), StoreError> {
         validate_env_keys(patch.keys())?;
-        let patch = self.protect_secrets(SHARED_SLOT, patch)?;
         let mut env = self.read_shared()?;
+        let patch = self.protect_secrets(SHARED_SLOT, patch)?;
         for (k, v) in patch {
             if v.is_empty() {
                 env.remove(&k);
