@@ -1,3 +1,6 @@
+> [!IMPORTANT]
+> **Superseded by [Fibo](https://github.com/majiayu000/fibo)** — native macOS multi-agent workbench.
+
 # ccp — Claude Code Profiles
 
 [![CI](https://github.com/majiayu000/ccp/actions/workflows/ci.yml/badge.svg)](https://github.com/majiayu000/ccp/actions/workflows/ci.yml)
